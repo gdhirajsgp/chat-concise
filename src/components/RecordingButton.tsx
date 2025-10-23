@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { Mic, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { Capacitor } from "@capacitor/core";
+import { VoiceRecorder } from "capacitor-voice-recorder";
 
 interface RecordingButtonProps {
   onRecordingComplete: (audioBlob: Blob, duration: number) => void;
@@ -24,61 +26,117 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart }: Recor
 
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        } 
-      });
-
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
+      // Check if running on native platform
+      const isNative = Capacitor.isNativePlatform();
       
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
-
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
-        onRecordingComplete(blob, duration);
+      if (isNative) {
+        // Request permissions for native audio recording
+        const { value: hasPermission } = await VoiceRecorder.requestAudioRecordingPermission();
         
-        stream.getTracks().forEach(track => track.stop());
-      };
+        if (!hasPermission) {
+          toast.error("Microphone permission denied");
+          return;
+        }
 
-      startTimeRef.current = Date.now();
-      mediaRecorder.start(1000);
-      setIsRecording(true);
-      setRecordingTime(0);
-      
-      timerRef.current = setInterval(() => {
-        setRecordingTime(prev => prev + 1);
-      }, 1000);
+        // Start native recording
+        await VoiceRecorder.startRecording();
+        
+        startTimeRef.current = Date.now();
+        setIsRecording(true);
+        setRecordingTime(0);
+        
+        timerRef.current = setInterval(() => {
+          setRecordingTime(prev => prev + 1);
+        }, 1000);
 
-      onRecordingStart?.();
-      toast.success("Recording started");
+        onRecordingStart?.();
+        toast.success("Recording started (background enabled)");
+      } else {
+        // Web browser fallback
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          } 
+        });
+
+        const mediaRecorder = new MediaRecorder(stream, {
+          mimeType: 'audio/webm;codecs=opus'
+        });
+        
+        mediaRecorderRef.current = mediaRecorder;
+        chunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            chunksRef.current.push(e.data);
+          }
+        };
+
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+          const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+          onRecordingComplete(blob, duration);
+          
+          stream.getTracks().forEach(track => track.stop());
+        };
+
+        startTimeRef.current = Date.now();
+        mediaRecorder.start(1000);
+        setIsRecording(true);
+        setRecordingTime(0);
+        
+        timerRef.current = setInterval(() => {
+          setRecordingTime(prev => prev + 1);
+        }, 1000);
+
+        onRecordingStart?.();
+        toast.success("Recording started");
+      }
     } catch (error) {
       console.error('Error accessing microphone:', error);
       toast.error("Could not access microphone");
     }
   };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
+  const stopRecording = async () => {
+    if (!isRecording) return;
+
+    const isNative = Capacitor.isNativePlatform();
+    
+    try {
+      if (isNative) {
+        // Stop native recording
+        const result = await VoiceRecorder.stopRecording();
+        const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+        
+        // Convert base64 to blob
+        const base64Data = result.value.recordDataBase64;
+        const binaryString = atob(base64Data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: 'audio/aac' });
+        
+        onRecordingComplete(blob, duration);
+      } else {
+        // Web browser fallback
+        if (mediaRecorderRef.current) {
+          mediaRecorderRef.current.stop();
+        }
+      }
+      
       setIsRecording(false);
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
       toast.success("Recording stopped");
+    } catch (error) {
+      console.error('Error stopping recording:', error);
+      toast.error("Error stopping recording");
     }
   };
 
