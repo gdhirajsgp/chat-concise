@@ -18,14 +18,13 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(0);
-  const chunkTimerRef = useRef<NodeJS.Timeout | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const isStoppingRef = useRef(false);
   const CHUNK_DURATION = 30000; // 30 seconds in milliseconds
 
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
-      if (chunkTimerRef.current) clearInterval(chunkTimerRef.current);
     };
   }, []);
 
@@ -76,52 +75,30 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
         });
 
         streamRef.current = stream;
-        const startNewRecorder = () => {
-          const mediaRecorder = new MediaRecorder(stream, {
-            mimeType: 'audio/webm;codecs=opus'
-          });
-          
-          mediaRecorderRef.current = mediaRecorder;
-          chunksRef.current = [];
+        const mediaRecorder = new MediaRecorder(stream, {
+          mimeType: 'audio/webm;codecs=opus'
+        });
+        
+        mediaRecorderRef.current = mediaRecorder;
+        isStoppingRef.current = false;
 
-          mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-              chunksRef.current.push(e.data);
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            const blob = new Blob([e.data], { type: 'audio/webm' });
+            if (!isStoppingRef.current) {
+              onChunkReady?.(blob);
+            } else {
+              const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+              onRecordingComplete(blob, duration);
             }
-          };
-
-          mediaRecorder.onstop = () => {
-            if (chunksRef.current.length > 0) {
-              const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-              
-              // If still recording, send chunk and restart
-              if (isRecording && streamRef.current && streamRef.current.active) {
-                if (onChunkReady) {
-                  onChunkReady(blob);
-                }
-                // Start a new recorder for the next chunk
-                setTimeout(() => {
-                  if (isRecording && streamRef.current && streamRef.current.active) {
-                    startNewRecorder();
-                  }
-                }, 100);
-              } else {
-                // Final chunk when stopping
-                const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
-                onRecordingComplete(blob, duration);
-              }
-            }
-          };
-
-          mediaRecorder.start();
-          
-          // Schedule automatic stop after 30 seconds
-          chunkTimerRef.current = setTimeout(() => {
-            if (mediaRecorder.state === 'recording') {
-              mediaRecorder.stop();
-            }
-          }, CHUNK_DURATION);
+          }
         };
+
+        mediaRecorder.onstop = () => {
+          // Finalization handled in ondataavailable when stopping
+        };
+
+        mediaRecorder.start(CHUNK_DURATION);
 
         startTimeRef.current = Date.now();
         setIsRecording(true);
@@ -131,7 +108,7 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
           setRecordingTime(prev => prev + 1);
         }, 1000);
 
-        startNewRecorder();
+        
 
         onRecordingStart?.();
         toast.success("Recording started");
@@ -166,10 +143,14 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
       } else {
         // Web browser fallback
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+          isStoppingRef.current = true;
           mediaRecorderRef.current.stop();
         }
         if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop());
+          // Stop tracks after recorder stops to ensure final chunk is flushed
+          setTimeout(() => {
+            streamRef.current?.getTracks().forEach(track => track.stop());
+          }, 0);
         }
       }
       
@@ -177,10 +158,6 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
-      }
-      if (chunkTimerRef.current) {
-        clearInterval(chunkTimerRef.current);
-        chunkTimerRef.current = null;
       }
       toast.success("Recording stopped");
     } catch (error) {
