@@ -75,16 +75,33 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
         });
 
         streamRef.current = stream;
-        const mediaRecorder = new MediaRecorder(stream, {
-          mimeType: 'audio/webm;codecs=opus'
-        });
+        
+        // Try different formats in order of Whisper compatibility
+        let mimeType = 'audio/webm;codecs=opus';
+        const supportedTypes = [
+          'audio/wav',
+          'audio/mp4',
+          'audio/webm;codecs=opus',
+          'audio/webm',
+        ];
+        
+        for (const type of supportedTypes) {
+          if (MediaRecorder.isTypeSupported(type)) {
+            mimeType = type;
+            console.log('Using media type:', type);
+            break;
+          }
+        }
+        
+        const mediaRecorder = new MediaRecorder(stream, { mimeType });
         
         mediaRecorderRef.current = mediaRecorder;
         isStoppingRef.current = false;
 
         mediaRecorder.ondataavailable = (e) => {
           if (e.data && e.data.size > 0) {
-            const blob = new Blob([e.data], { type: 'audio/webm' });
+            const blob = new Blob([e.data], { type: mimeType });
+            console.log(`Chunk ready: ${blob.size} bytes, type: ${blob.type}`);
             if (!isStoppingRef.current) {
               onChunkReady?.(blob);
             } else {
@@ -96,6 +113,7 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
 
         mediaRecorder.onstop = () => {
           // Finalization handled in ondataavailable when stopping
+          console.log('MediaRecorder stopped');
         };
 
         mediaRecorder.start(CHUNK_DURATION);
