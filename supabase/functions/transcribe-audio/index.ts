@@ -18,24 +18,31 @@ serve(async (req) => {
       throw new Error('No audio data provided');
     }
 
-    // Determine content type and filename extension
-    const providedType = (mimeType as string | undefined)?.toLowerCase() || 'audio/webm';
+    // Normalize and map content type to a safe filename extension
+    const rawType = (mimeType as string | undefined)?.toLowerCase() || 'audio/webm';
+    const baseType = rawType.split(';')[0].trim();
+
     const typeToExt: Record<string, string> = {
       'audio/webm': 'webm',
-      'audio/m4a': 'm4a',
-      'audio/mp3': 'mp3',
-      'audio/mpeg': 'mpga',
+      'video/webm': 'webm',
       'audio/wav': 'wav',
+      'audio/x-wav': 'wav',
+      'audio/mpeg': 'mp3',
+      'audio/mp3': 'mp3',
       'audio/ogg': 'ogg',
       'audio/oga': 'oga',
+      'audio/opus': 'ogg',
       'audio/flac': 'flac',
-      // Some platforms report AAC even when wrapped in m4a; map to m4a which OpenAI supports
-      'audio/aac': 'm4a',
+      'audio/mp4': 'mp4',
+      'audio/m4a': 'm4a',
+      'audio/x-m4a': 'm4a',
+      'audio/aac': 'm4a', // wrap AAC as m4a/mp4 container for Whisper
     };
-    const ext = typeToExt[providedType] ?? 'webm';
-    const contentType = Object.keys(typeToExt).includes(providedType) ? providedType : 'audio/webm';
 
-    console.log(`Transcribing audio... type=${contentType} ext=${ext}`);
+    const ext = typeToExt[baseType] ?? 'webm';
+    const contentType = (baseType in typeToExt) ? baseType : 'audio/webm';
+
+    console.log(`Transcribing audio... rawType=${rawType} baseType=${baseType} useType=${contentType} ext=${ext}`);
 
     const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
     if (!OPENAI_API_KEY) {
