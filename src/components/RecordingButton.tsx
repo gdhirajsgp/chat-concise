@@ -19,22 +19,22 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(0);
   const streamRef = useRef<MediaStream | null>(null);
-  const isStoppingRef = useRef(false);
+  const chunkIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isRecordingRef = useRef(false);
   const CHUNK_DURATION = 30000; // 30 seconds in milliseconds
 
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (chunkIntervalRef.current) clearTimeout(chunkIntervalRef.current);
     };
   }, []);
 
-  const restartRecorderForChunk = () => {
-    if (!mediaRecorderRef.current || !streamRef.current || !isRecording) return;
+  const processChunkAndContinue = () => {
+    if (!mediaRecorderRef.current || mediaRecorderRef.current.state !== 'recording') return;
     
-    // Stop current recorder to get a complete audio chunk
-    if (mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
-    }
+    // Stop current recorder to get a complete chunk
+    mediaRecorderRef.current.stop();
   };
 
   const startRecording = async () => {
@@ -75,48 +75,74 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
         });
 
         streamRef.current = stream;
+        isRecordingRef.current = true;
         
-        // Try different formats in order of Whisper compatibility
-        let mimeType = 'audio/webm;codecs=opus';
-        const supportedTypes = [
-          'audio/wav',
-          'audio/mp4',
-          'audio/webm;codecs=opus',
-          'audio/webm',
-        ];
-        
-        for (const type of supportedTypes) {
-          if (MediaRecorder.isTypeSupported(type)) {
-            mimeType = type;
-            console.log('Using media type:', type);
-            break;
-          }
-        }
-        
-        const mediaRecorder = new MediaRecorder(stream, { mimeType });
-        
-        mediaRecorderRef.current = mediaRecorder;
-        isStoppingRef.current = false;
-
-        mediaRecorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) {
-            const blob = new Blob([e.data], { type: mimeType });
-            console.log(`Chunk ready: ${blob.size} bytes, type: ${blob.type}`);
-            if (!isStoppingRef.current) {
-              onChunkReady?.(blob);
-            } else {
-              const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
-              onRecordingComplete(blob, duration);
+        const startNewRecorder = () => {
+          if (!isRecordingRef.current || !streamRef.current) return;
+          
+          // Try different formats in order of Whisper compatibility
+          let mimeType = 'audio/webm;codecs=opus';
+          const supportedTypes = [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+          ];
+          
+          for (const type of supportedTypes) {
+            if (MediaRecorder.isTypeSupported(type)) {
+              mimeType = type;
+              break;
             }
           }
+          
+          const mediaRecorder = new MediaRecorder(streamRef.current, { mimeType });
+          mediaRecorderRef.current = mediaRecorder;
+          chunksRef.current = [];
+
+          mediaRecorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) {
+              chunksRef.current.push(e.data);
+            }
+          };
+
+          mediaRecorder.onstop = () => {
+            if (chunksRef.current.length === 0) return;
+            
+            const blob = new Blob(chunksRef.current, { type: mimeType });
+            const blobSizeKB = (blob.size / 1024).toFixed(2);
+            console.log(`Chunk ready: ${blobSizeKB}KB, type: ${blob.type}`);
+            
+            // Check if still recording (this is a chunk, not final stop)
+            if (isRecordingRef.current && streamRef.current && streamRef.current.active) {
+              // Send chunk for transcription
+              if (onChunkReady && blob.size > 1000) { // Only send if > 1KB
+                onChunkReady(blob);
+              }
+              
+              // Start next recorder after a brief delay
+              setTimeout(() => {
+                if (isRecordingRef.current) {
+                  startNewRecorder();
+                }
+              }, 100);
+            } else {
+              // Final stop - send to completion handler
+              const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+              if (blob.size > 1000) {
+                onRecordingComplete(blob, duration);
+              }
+            }
+          };
+
+          mediaRecorder.start();
+          console.log('MediaRecorder started, will chunk in 30s');
+          
+          // Schedule next chunk
+          chunkIntervalRef.current = setTimeout(() => {
+            processChunkAndContinue();
+          }, CHUNK_DURATION);
         };
 
-        mediaRecorder.onstop = () => {
-          // Finalization handled in ondataavailable when stopping
-          console.log('MediaRecorder stopped');
-        };
-
-        mediaRecorder.start(CHUNK_DURATION);
+        startNewRecorder();
 
         startTimeRef.current = Date.now();
         setIsRecording(true);
@@ -160,15 +186,19 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
         onRecordingComplete(blob, duration);
       } else {
         // Web browser fallback
+        isRecordingRef.current = false;
+        
+        if (chunkIntervalRef.current) {
+          clearTimeout(chunkIntervalRef.current);
+          chunkIntervalRef.current = null;
+        }
+        
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-          isStoppingRef.current = true;
           mediaRecorderRef.current.stop();
         }
+        
         if (streamRef.current) {
-          // Stop tracks after recorder stops to ensure final chunk is flushed
-          setTimeout(() => {
-            streamRef.current?.getTracks().forEach(track => track.stop());
-          }, 0);
+          streamRef.current.getTracks().forEach(track => track.stop());
         }
       }
       
