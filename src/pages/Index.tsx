@@ -179,10 +179,57 @@ const Index = () => {
         setCurrentMeetingId(null);
         fetchMeetings();
       } else {
-        // No chunks were processed, handle as before
-        toast.info("No transcript captured");
+        // No chunks were processed or first chunk failed — transcribe final blob and save as a meeting
+        if (audioBlob.size > 0) {
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+
+          await new Promise<void>((resolve) => {
+            reader.onloadend = async () => {
+              try {
+                const base64Audio = (reader.result as string).split(',')[1];
+                const { data, error } = await supabase.functions.invoke('transcribe-audio', {
+                  body: { audioBase64: base64Audio, mimeType: audioBlob.type }
+                });
+
+                if (error) {
+                  console.error('Final transcription error:', error);
+                  toast.error('Failed to transcribe final audio');
+                } else if (data?.transcript) {
+                  const actualDuration = Math.floor((Date.now() - recordingStartTime) / 1000);
+                  const { error: insertError } = await supabase
+                    .from('meetings')
+                    .insert({
+                      title: `Meeting ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
+                      transcript: data.transcript,
+                      duration_seconds: actualDuration,
+                      user_id: user?.id,
+                    });
+
+                  if (insertError) {
+                    console.error('Failed to save meeting:', insertError);
+                    toast.error('Failed to save meeting');
+                  } else {
+                    toast.success('Recording saved!');
+                    fetchMeetings();
+                  }
+                } else {
+                  toast.info('No transcript captured');
+                }
+              } catch (e) {
+                console.error('Error handling final transcription:', e);
+                toast.error('Error processing final transcription');
+              } finally {
+                resolve();
+              }
+            };
+          });
+        } else {
+          toast.info('No audio captured');
+        }
         setAccumulatedTranscript("");
         setRecordingStartTime(0);
+        setCurrentMeetingId(null);
       }
     } catch (error) {
       console.error('Error processing recording:', error);
