@@ -8,21 +8,38 @@ import { VoiceRecorder } from "capacitor-voice-recorder";
 interface RecordingButtonProps {
   onRecordingComplete: (audioBlob: Blob, duration: number) => void;
   onRecordingStart?: () => void;
+  onChunkReady?: (audioBlob: Blob) => void;
 }
 
-export const RecordingButton = ({ onRecordingComplete, onRecordingStart }: RecordingButtonProps) => {
+export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunkReady }: RecordingButtonProps) => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(0);
+  const chunkTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastChunkTimeRef = useRef<number>(0);
+  const CHUNK_DURATION = 30000; // 30 seconds in milliseconds
 
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (chunkTimerRef.current) clearInterval(chunkTimerRef.current);
     };
   }, []);
+
+  const sendChunk = async () => {
+    if (!mediaRecorderRef.current || chunksRef.current.length === 0) return;
+    
+    const chunkBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+    chunksRef.current = [];
+    lastChunkTimeRef.current = Date.now();
+    
+    if (onChunkReady) {
+      onChunkReady(chunkBlob);
+    }
+  };
 
   const startRecording = async () => {
     try {
@@ -47,6 +64,15 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart }: Recor
         
         timerRef.current = setInterval(() => {
           setRecordingTime(prev => prev + 1);
+        }, 1000);
+
+        lastChunkTimeRef.current = Date.now();
+        chunkTimerRef.current = setInterval(() => {
+          const elapsed = Date.now() - lastChunkTimeRef.current;
+          if (elapsed >= CHUNK_DURATION) {
+            // For native, we can't easily chunk, so skip
+            console.log("Native recording - chunks not supported");
+          }
         }, 1000);
 
         onRecordingStart?.();
@@ -75,20 +101,32 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart }: Recor
         };
 
         mediaRecorder.onstop = () => {
-          const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-          const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
-          onRecordingComplete(blob, duration);
+          // Send any remaining chunks
+          if (chunksRef.current.length > 0) {
+            const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+            const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+            onRecordingComplete(blob, duration);
+          }
           
           stream.getTracks().forEach(track => track.stop());
         };
 
         startTimeRef.current = Date.now();
+        lastChunkTimeRef.current = Date.now();
         mediaRecorder.start(1000);
         setIsRecording(true);
         setRecordingTime(0);
         
         timerRef.current = setInterval(() => {
           setRecordingTime(prev => prev + 1);
+        }, 1000);
+
+        // Check every second if we need to send a chunk
+        chunkTimerRef.current = setInterval(() => {
+          const elapsed = Date.now() - lastChunkTimeRef.current;
+          if (elapsed >= CHUNK_DURATION) {
+            sendChunk();
+          }
         }, 1000);
 
         onRecordingStart?.();
@@ -132,6 +170,10 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart }: Recor
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
+      }
+      if (chunkTimerRef.current) {
+        clearInterval(chunkTimerRef.current);
+        chunkTimerRef.current = null;
       }
       toast.success("Recording stopped");
     } catch (error) {

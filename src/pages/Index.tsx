@@ -18,6 +18,8 @@ const Index = () => {
   const [showManualDialog, setShowManualDialog] = useState(false);
   const [manualTitle, setManualTitle] = useState("");
   const [manualTranscript, setManualTranscript] = useState("");
+  const [accumulatedTranscript, setAccumulatedTranscript] = useState("");
+  const [recordingStartTime, setRecordingStartTime] = useState<number>(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -54,54 +56,94 @@ const Index = () => {
     setMeetings(data || []);
   };
 
-  const handleRecordingComplete = async (audioBlob: Blob, duration: number) => {
-    setIsProcessing(true);
+  const handleChunkReady = async (audioBlob: Blob) => {
     try {
-      // Convert blob to base64
       const reader = new FileReader();
       reader.readAsDataURL(audioBlob);
       
       reader.onloadend = async () => {
         const base64Audio = (reader.result as string).split(',')[1];
-
-        // Transcribe audio
-        const { data: transcriptData, error: transcriptError } = await supabase.functions.invoke('transcribe-audio', {
-          body: { audioBase64: base64Audio }
+        
+        const { data, error } = await supabase.functions.invoke('transcribe-audio', {
+          body: { audio: base64Audio }
         });
 
-        if (transcriptError) throw transcriptError;
+        if (error) {
+          console.error('Transcription error:', error);
+          return;
+        }
 
-        // Upload audio file
-        const fileName = `${user.id}/${Date.now()}.webm`;
-        const { error: uploadError } = await supabase.storage
-          .from('meeting-recordings')
-          .upload(fileName, audioBlob);
-
-        if (uploadError) throw uploadError;
-
-        const { data: { publicUrl } } = supabase.storage
-          .from('meeting-recordings')
-          .getPublicUrl(fileName);
-
-        // Save meeting
-        const { error: insertError } = await supabase
-          .from('meetings')
-          .insert({
-            user_id: user.id,
-            title: `Meeting ${new Date().toLocaleDateString()}`,
-            audio_url: publicUrl,
-            transcript: transcriptData.transcript,
-            duration_seconds: duration,
-          });
-
-        if (insertError) throw insertError;
-
-        toast.success("Recording saved and transcribed!");
-        fetchMeetings();
+        if (data?.text) {
+          setAccumulatedTranscript(prev => prev + (prev ? ' ' : '') + data.text);
+          toast.success("Chunk transcribed");
+        }
       };
+    } catch (error) {
+      console.error('Error processing chunk:', error);
+    }
+  };
+
+  const handleRecordingComplete = async (audioBlob: Blob, duration: number) => {
+    setIsProcessing(true);
+    try {
+      // Process final chunk if any
+      if (audioBlob.size > 0) {
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        
+        await new Promise<void>((resolve) => {
+          reader.onloadend = async () => {
+            const base64Audio = (reader.result as string).split(',')[1];
+            
+            const { data, error } = await supabase.functions.invoke('transcribe-audio', {
+              body: { audio: base64Audio }
+            });
+
+            if (!error && data?.text) {
+              setAccumulatedTranscript(prev => prev + (prev ? ' ' : '') + data.text);
+            }
+            resolve();
+          };
+        });
+      }
+
+      const transcript = accumulatedTranscript || "No transcript available";
+      const actualDuration = Math.floor((Date.now() - recordingStartTime) / 1000);
+
+      // Upload audio file
+      const fileName = `${user.id}/${Date.now()}.webm`;
+      const { error: uploadError } = await supabase.storage
+        .from('meeting-recordings')
+        .upload(fileName, audioBlob);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('meeting-recordings')
+        .getPublicUrl(fileName);
+
+      // Save meeting
+      const { error: insertError } = await supabase
+        .from('meetings')
+        .insert({
+          user_id: user.id,
+          title: `Meeting ${new Date().toLocaleDateString()}`,
+          audio_url: publicUrl,
+          transcript,
+          duration_seconds: actualDuration,
+        });
+
+      if (insertError) throw insertError;
+
+      toast.success("Recording saved and transcribed!");
+      setAccumulatedTranscript("");
+      setRecordingStartTime(0);
+      fetchMeetings();
     } catch (error) {
       console.error('Error processing recording:', error);
       toast.error("Failed to process recording");
+      setAccumulatedTranscript("");
+      setRecordingStartTime(0);
     } finally {
       setIsProcessing(false);
     }
@@ -179,7 +221,13 @@ const Index = () => {
             <h2 className="text-3xl font-bold">Record Your Meeting</h2>
             <RecordingButton 
               onRecordingComplete={handleRecordingComplete}
-              onRecordingStart={() => toast.info("Recording started - audio will be transcribed automatically")}
+              onChunkReady={handleChunkReady}
+              onRecordingStart={() => {
+                setIsProcessing(false);
+                setAccumulatedTranscript("");
+                setRecordingStartTime(Date.now());
+                toast.info("Recording started - transcribing in 30s chunks");
+              }}
             />
             {isProcessing && (
               <p className="text-muted-foreground animate-pulse">
