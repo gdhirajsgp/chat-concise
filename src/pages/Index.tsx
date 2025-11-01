@@ -65,7 +65,7 @@ const Index = () => {
         const base64Audio = (reader.result as string).split(',')[1];
         
         const { data, error } = await supabase.functions.invoke('transcribe-audio', {
-          body: { audio: base64Audio }
+          body: { audioBase64: base64Audio }
         });
 
         if (error) {
@@ -73,8 +73,8 @@ const Index = () => {
           return;
         }
 
-        if (data?.text) {
-          setAccumulatedTranscript(prev => prev + (prev ? ' ' : '') + data.text);
+        if (data?.transcript) {
+          setAccumulatedTranscript(prev => prev + (prev ? ' ' : '') + data.transcript);
           toast.success("Chunk transcribed");
         }
       };
@@ -96,11 +96,11 @@ const Index = () => {
             const base64Audio = (reader.result as string).split(',')[1];
             
             const { data, error } = await supabase.functions.invoke('transcribe-audio', {
-              body: { audio: base64Audio }
+              body: { audioBase64: base64Audio }
             });
 
-            if (!error && data?.text) {
-              setAccumulatedTranscript(prev => prev + (prev ? ' ' : '') + data.text);
+            if (!error && data?.transcript) {
+              setAccumulatedTranscript(prev => prev + (prev ? ' ' : '') + data.transcript);
             }
             resolve();
           };
