@@ -67,9 +67,9 @@ const Index = () => {
         const base64Audio = (reader.result as string).split(',')[1];
         
         console.log('Sending chunk for transcription...');
-        const { data, error } = await supabase.functions.invoke('transcribe-audio', {
-          body: { audioBase64: base64Audio, mimeType: audioBlob.type }
-        });
+          const { data, error } = await supabase.functions.invoke('transcribe-audio', {
+            body: { audioBase64: base64Audio, mimeType: (audioBlob.type?.split(';')[0] || 'audio/webm') }
+          });
 
         if (error) {
           console.error('Transcription error:', error);
@@ -152,7 +152,7 @@ const Index = () => {
               const base64Audio = (reader.result as string).split(',')[1];
               
               const { data, error } = await supabase.functions.invoke('transcribe-audio', {
-                body: { audioBase64: base64Audio, mimeType: audioBlob.type }
+                body: { audioBase64: base64Audio, mimeType: (audioBlob.type?.split(';')[0] || 'audio/webm') }
               });
 
               if (!error && data?.transcript) {
@@ -188,9 +188,9 @@ const Index = () => {
             reader.onloadend = async () => {
               try {
                 const base64Audio = (reader.result as string).split(',')[1];
-                const { data, error } = await supabase.functions.invoke('transcribe-audio', {
-                  body: { audioBase64: base64Audio, mimeType: audioBlob.type }
-                });
+                  const { data, error } = await supabase.functions.invoke('transcribe-audio', {
+                    body: { audioBase64: base64Audio, mimeType: (audioBlob.type?.split(';')[0] || 'audio/webm') }
+                  });
 
                 if (error) {
                   console.error('Final transcription error:', error);

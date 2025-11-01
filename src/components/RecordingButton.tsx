@@ -30,133 +30,137 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
     };
   }, []);
 
+  const pickBestMediaOptions = (): MediaRecorderOptions | undefined => {
+    // Order matters – prefer widely supported audio-only containers
+    const preferredTypes = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/ogg',
+      'audio/mp4',
+      'audio/m4a',
+      'audio/aac',
+      'audio/wav',
+    ];
+
+    for (const t of preferredTypes) {
+      try {
+        if ((MediaRecorder as any).isTypeSupported?.(t)) {
+          return { mimeType: t } as MediaRecorderOptions;
+        }
+      } catch { /* ignore */ }
+    }
+    // Let the browser decide if none matched
+    return undefined;
+  };
+
   const processChunkAndContinue = () => {
     if (!mediaRecorderRef.current || mediaRecorderRef.current.state !== 'recording') return;
-    
-    // Stop current recorder to get a complete chunk
+    if (chunkIntervalRef.current) {
+      clearTimeout(chunkIntervalRef.current);
+      chunkIntervalRef.current = null;
+    }
     mediaRecorderRef.current.stop();
   };
 
   const startRecording = async () => {
     try {
-      // Check if running on native platform
       const isNative = Capacitor.isNativePlatform();
-      
+
       if (isNative) {
-        // Request permissions for native audio recording
         const { value: hasPermission } = await VoiceRecorder.requestAudioRecordingPermission();
-        
         if (!hasPermission) {
           toast.error("Microphone permission denied");
           return;
         }
 
-        // Start native recording
         await VoiceRecorder.startRecording();
-        
         startTimeRef.current = Date.now();
         setIsRecording(true);
+        isRecordingRef.current = true;
         setRecordingTime(0);
-        
-        timerRef.current = setInterval(() => {
-          setRecordingTime(prev => prev + 1);
-        }, 1000);
 
+        timerRef.current = setInterval(() => setRecordingTime((p) => p + 1), 1000);
         onRecordingStart?.();
         toast.success("Recording started (background enabled)");
-      } else {
-        // Web browser fallback
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          } 
-        });
+        return;
+      }
 
-        streamRef.current = stream;
-        isRecordingRef.current = true;
-        
-        const startNewRecorder = () => {
-          if (!isRecordingRef.current || !streamRef.current) return;
-          
-          // Try different formats in order of Whisper compatibility
-          let mimeType = 'audio/webm;codecs=opus';
-          const supportedTypes = [
-            'audio/webm;codecs=opus',
-            'audio/webm',
-          ];
-          
-          for (const type of supportedTypes) {
-            if (MediaRecorder.isTypeSupported(type)) {
-              mimeType = type;
-              break;
-            }
+      // Web browser path
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+
+      streamRef.current = stream;
+      isRecordingRef.current = true;
+      startTimeRef.current = Date.now();
+      setIsRecording(true);
+      setRecordingTime(0);
+      timerRef.current = setInterval(() => setRecordingTime((p) => p + 1), 1000);
+
+      const startNewRecorder = () => {
+        if (!isRecordingRef.current || !streamRef.current) return;
+
+        const options = pickBestMediaOptions();
+        let recorder: MediaRecorder;
+        try {
+          recorder = options ? new MediaRecorder(streamRef.current!, options) : new MediaRecorder(streamRef.current!);
+        } catch (e) {
+          // Fallback without options if specific mimeType fails
+          recorder = new MediaRecorder(streamRef.current!);
+        }
+
+        mediaRecorderRef.current = recorder;
+        chunksRef.current = [];
+
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            chunksRef.current.push(e.data);
           }
-          
-          const mediaRecorder = new MediaRecorder(streamRef.current, { mimeType });
-          mediaRecorderRef.current = mediaRecorder;
-          chunksRef.current = [];
-
-          mediaRecorder.ondataavailable = (e) => {
-            if (e.data && e.data.size > 0) {
-              chunksRef.current.push(e.data);
-            }
-          };
-
-          mediaRecorder.onstop = () => {
-            if (chunksRef.current.length === 0) return;
-            
-            const blob = new Blob(chunksRef.current, { type: mimeType });
-            const blobSizeKB = (blob.size / 1024).toFixed(2);
-            console.log(`Chunk ready: ${blobSizeKB}KB, type: ${blob.type}`);
-            
-            // Check if still recording (this is a chunk, not final stop)
-            if (isRecordingRef.current && streamRef.current && streamRef.current.active) {
-              // Send chunk for transcription
-              if (onChunkReady && blob.size > 1000) { // Only send if > 1KB
-                onChunkReady(blob);
-              }
-              
-              // Start next recorder after a brief delay
-              setTimeout(() => {
-                if (isRecordingRef.current) {
-                  startNewRecorder();
-                }
-              }, 100);
-            } else {
-              // Final stop - send to completion handler
-              const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
-              if (blob.size > 1000) {
-                onRecordingComplete(blob, duration);
-              }
-            }
-          };
-
-          mediaRecorder.start();
-          console.log('MediaRecorder started, will chunk in 30s');
-          
-          // Schedule next chunk
-          chunkIntervalRef.current = setTimeout(() => {
-            processChunkAndContinue();
-          }, CHUNK_DURATION);
         };
 
-        startNewRecorder();
+        recorder.onstop = () => {
+          if (chunksRef.current.length === 0) return;
 
-        startTimeRef.current = Date.now();
-        setIsRecording(true);
-        setRecordingTime(0);
-        
-        timerRef.current = setInterval(() => {
-          setRecordingTime(prev => prev + 1);
-        }, 1000);
+          const raw = new Blob(chunksRef.current);
+          const inferred = (raw.type && raw.type !== '') ? raw.type : (chunksRef.current[0]?.type || 'audio/webm');
+          const baseType = inferred.split(';')[0];
+          const finalBlob = new Blob([raw], { type: baseType });
+          const sizeKB = Math.round(finalBlob.size / 1024);
+          console.log(`Chunk ready: ${sizeKB}KB, type: ${finalBlob.type}`);
 
-        
+          if (isRecordingRef.current && streamRef.current && streamRef.current.active) {
+            // Only send substantial chunks to avoid Whisper rejections
+            if (onChunkReady && finalBlob.size > 20000) {
+              onChunkReady(finalBlob);
+            } else {
+              console.warn('Skipping tiny chunk:', sizeKB, 'KB');
+            }
 
-        onRecordingStart?.();
-        toast.success("Recording started");
-      }
+            // Start the next recorder after a tiny delay
+            setTimeout(() => {
+              if (isRecordingRef.current) startNewRecorder();
+            }, 100);
+          } else {
+            // Final stop
+            const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+            if (finalBlob.size > 20000) {
+              onRecordingComplete(finalBlob, duration);
+            } else {
+              toast.info('No meaningful audio captured');
+            }
+          }
+        };
+
+        recorder.start();
+        if (chunkIntervalRef.current) clearTimeout(chunkIntervalRef.current);
+        chunkIntervalRef.current = setTimeout(() => processChunkAndContinue(), CHUNK_DURATION);
+        console.log('MediaRecorder started');
+      };
+
+      startNewRecorder();
+      onRecordingStart?.();
+      toast.success("Recording started");
     } catch (error) {
       console.error('Error accessing microphone:', error);
       toast.error("Could not access microphone");
@@ -167,41 +171,33 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
     if (!isRecording) return;
 
     const isNative = Capacitor.isNativePlatform();
-    
+
     try {
       if (isNative) {
-        // Stop native recording
         const result = await VoiceRecorder.stopRecording();
         const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
-        
-        // Convert base64 to blob
+
         const base64Data = result.value.recordDataBase64;
         const binaryString = atob(base64Data);
         const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
+        for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
         const blob = new Blob([bytes], { type: 'audio/m4a' });
-        
         onRecordingComplete(blob, duration);
       } else {
         // Web browser fallback
         isRecordingRef.current = false;
-        
         if (chunkIntervalRef.current) {
           clearTimeout(chunkIntervalRef.current);
           chunkIntervalRef.current = null;
         }
-        
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
           mediaRecorderRef.current.stop();
         }
-        
         if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current.getTracks().forEach((t) => t.stop());
         }
       }
-      
+
       setIsRecording(false);
       if (timerRef.current) {
         clearInterval(timerRef.current);
