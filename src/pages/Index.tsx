@@ -20,6 +20,7 @@ const Index = () => {
   const [manualTranscript, setManualTranscript] = useState("");
   const [accumulatedTranscript, setAccumulatedTranscript] = useState("");
   const [recordingStartTime, setRecordingStartTime] = useState<number>(0);
+  const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -58,92 +59,137 @@ const Index = () => {
 
   const handleChunkReady = async (audioBlob: Blob) => {
     try {
+      console.log('Processing chunk, size:', audioBlob.size);
       const reader = new FileReader();
       reader.readAsDataURL(audioBlob);
       
       reader.onloadend = async () => {
         const base64Audio = (reader.result as string).split(',')[1];
         
+        console.log('Sending chunk for transcription...');
         const { data, error } = await supabase.functions.invoke('transcribe-audio', {
           body: { audioBase64: base64Audio }
         });
 
         if (error) {
           console.error('Transcription error:', error);
+          toast.error("Failed to transcribe chunk");
           return;
         }
 
         if (data?.transcript) {
-          setAccumulatedTranscript(prev => prev + (prev ? ' ' : '') + data.transcript);
-          toast.success("Chunk transcribed");
+          console.log('Chunk transcribed:', data.transcript.substring(0, 50));
+          const newTranscript = data.transcript;
+          const updatedTranscript = accumulatedTranscript + (accumulatedTranscript ? ' ' : '') + newTranscript;
+          setAccumulatedTranscript(updatedTranscript);
+          
+          // If this is the first chunk, create a new meeting
+          if (!currentMeetingId) {
+            const duration = Math.floor((Date.now() - recordingStartTime) / 1000);
+            const { data: meetingData, error: insertError } = await supabase
+              .from('meetings')
+              .insert({
+                title: `Meeting ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
+                transcript: newTranscript,
+                duration_seconds: duration,
+                user_id: user?.id
+              })
+              .select()
+              .single();
+
+            if (insertError) {
+              console.error('Failed to create meeting:', insertError);
+              toast.error("Failed to save meeting");
+              return;
+            }
+
+            setCurrentMeetingId(meetingData.id);
+            toast.success("First chunk saved!");
+            fetchMeetings();
+          } else {
+            // Update existing meeting with new transcript
+            const duration = Math.floor((Date.now() - recordingStartTime) / 1000);
+            const { error: updateError } = await supabase
+              .from('meetings')
+              .update({
+                transcript: updatedTranscript,
+                duration_seconds: duration,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', currentMeetingId);
+
+            if (updateError) {
+              console.error('Failed to update meeting:', updateError);
+              toast.error("Failed to update transcript");
+              return;
+            }
+
+            toast.success("Chunk appended");
+            fetchMeetings();
+          }
         }
       };
     } catch (error) {
       console.error('Error processing chunk:', error);
+      toast.error("Failed to process chunk");
     }
   };
 
   const handleRecordingComplete = async (audioBlob: Blob, duration: number) => {
     setIsProcessing(true);
     try {
-      // Process final chunk if any
-      if (audioBlob.size > 0) {
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
+      console.log('Recording complete, processing final chunk');
+      
+      // If we have a meeting ID, just finalize it
+      if (currentMeetingId) {
+        // Process final chunk if it has data
+        if (audioBlob.size > 0) {
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          
+          await new Promise<void>((resolve) => {
+            reader.onloadend = async () => {
+              const base64Audio = (reader.result as string).split(',')[1];
+              
+              const { data, error } = await supabase.functions.invoke('transcribe-audio', {
+                body: { audioBase64: base64Audio }
+              });
+
+              if (!error && data?.transcript) {
+                const finalTranscript = accumulatedTranscript + (accumulatedTranscript ? ' ' : '') + data.transcript;
+                const actualDuration = Math.floor((Date.now() - recordingStartTime) / 1000);
+                
+                await supabase
+                  .from('meetings')
+                  .update({
+                    transcript: finalTranscript,
+                    duration_seconds: actualDuration,
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('id', currentMeetingId);
+              }
+              resolve();
+            };
+          });
+        }
         
-        await new Promise<void>((resolve) => {
-          reader.onloadend = async () => {
-            const base64Audio = (reader.result as string).split(',')[1];
-            
-            const { data, error } = await supabase.functions.invoke('transcribe-audio', {
-              body: { audioBase64: base64Audio }
-            });
-
-            if (!error && data?.transcript) {
-              setAccumulatedTranscript(prev => prev + (prev ? ' ' : '') + data.transcript);
-            }
-            resolve();
-          };
-        });
+        toast.success("Recording saved!");
+        setAccumulatedTranscript("");
+        setRecordingStartTime(0);
+        setCurrentMeetingId(null);
+        fetchMeetings();
+      } else {
+        // No chunks were processed, handle as before
+        toast.info("No transcript captured");
+        setAccumulatedTranscript("");
+        setRecordingStartTime(0);
       }
-
-      const transcript = accumulatedTranscript || "No transcript available";
-      const actualDuration = Math.floor((Date.now() - recordingStartTime) / 1000);
-
-      // Upload audio file
-      const fileName = `${user.id}/${Date.now()}.webm`;
-      const { error: uploadError } = await supabase.storage
-        .from('meeting-recordings')
-        .upload(fileName, audioBlob);
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('meeting-recordings')
-        .getPublicUrl(fileName);
-
-      // Save meeting
-      const { error: insertError } = await supabase
-        .from('meetings')
-        .insert({
-          user_id: user.id,
-          title: `Meeting ${new Date().toLocaleDateString()}`,
-          audio_url: publicUrl,
-          transcript,
-          duration_seconds: actualDuration,
-        });
-
-      if (insertError) throw insertError;
-
-      toast.success("Recording saved and transcribed!");
-      setAccumulatedTranscript("");
-      setRecordingStartTime(0);
-      fetchMeetings();
     } catch (error) {
       console.error('Error processing recording:', error);
-      toast.error("Failed to process recording");
+      toast.error("Failed to finalize recording");
       setAccumulatedTranscript("");
       setRecordingStartTime(0);
+      setCurrentMeetingId(null);
     } finally {
       setIsProcessing(false);
     }
@@ -226,6 +272,7 @@ const Index = () => {
                 setIsProcessing(false);
                 setAccumulatedTranscript("");
                 setRecordingStartTime(Date.now());
+                setCurrentMeetingId(null);
                 toast.info("Recording started - transcribing in 30s chunks");
               }}
             />
