@@ -31,16 +31,10 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
   }, []);
 
   const pickBestMediaOptions = (): MediaRecorderOptions | undefined => {
-    // Order matters – prefer widely supported audio-only containers
+    // Only use WebM - mp4 creates malformed chunks when stop/restart is used
     const preferredTypes = [
       'audio/webm;codecs=opus',
       'audio/webm',
-      'audio/ogg;codecs=opus',
-      'audio/ogg',
-      'audio/mp4',
-      'audio/m4a',
-      'audio/aac',
-      'audio/wav',
     ];
 
     for (const t of preferredTypes) {
@@ -50,8 +44,7 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
         }
       } catch { /* ignore */ }
     }
-    // Let the browser decide if none matched
-    return undefined;
+    return { mimeType: 'audio/webm' };
   };
 
   const processChunkAndContinue = () => {

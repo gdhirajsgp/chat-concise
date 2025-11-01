@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Auth } from "@/components/Auth";
 import { RecordingButton } from "@/components/RecordingButton";
@@ -20,7 +20,7 @@ const Index = () => {
   const [manualTranscript, setManualTranscript] = useState("");
   const [accumulatedTranscript, setAccumulatedTranscript] = useState("");
   const [recordingStartTime, setRecordingStartTime] = useState<number>(0);
-  const [currentMeetingId, setCurrentMeetingId] = useState<string | null>(null);
+  const currentMeetingIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -84,7 +84,7 @@ const Index = () => {
           setAccumulatedTranscript(updatedTranscript);
           
           // If this is the first chunk, create a new meeting
-          if (!currentMeetingId) {
+          if (!currentMeetingIdRef.current) {
             const duration = Math.floor((Date.now() - recordingStartTime) / 1000);
             const { data: meetingData, error: insertError } = await supabase
               .from('meetings')
@@ -103,7 +103,7 @@ const Index = () => {
               return;
             }
 
-            setCurrentMeetingId(meetingData.id);
+            currentMeetingIdRef.current = meetingData.id;
             toast.success("First chunk saved!");
             fetchMeetings();
           } else {
@@ -116,7 +116,7 @@ const Index = () => {
                 duration_seconds: duration,
                 updated_at: new Date().toISOString()
               })
-              .eq('id', currentMeetingId);
+              .eq('id', currentMeetingIdRef.current);
 
             if (updateError) {
               console.error('Failed to update meeting:', updateError);
@@ -141,7 +141,7 @@ const Index = () => {
       console.log('Recording complete, processing final chunk');
       
       // If we have a meeting ID, just finalize it
-      if (currentMeetingId) {
+      if (currentMeetingIdRef.current) {
         // Process final chunk if it has data
         if (audioBlob.size > 0) {
           const reader = new FileReader();
@@ -166,7 +166,7 @@ const Index = () => {
                     duration_seconds: actualDuration,
                     updated_at: new Date().toISOString()
                   })
-                  .eq('id', currentMeetingId);
+                  .eq('id', currentMeetingIdRef.current);
               }
               resolve();
             };
@@ -176,7 +176,7 @@ const Index = () => {
         toast.success("Recording saved!");
         setAccumulatedTranscript("");
         setRecordingStartTime(0);
-        setCurrentMeetingId(null);
+        currentMeetingIdRef.current = null;
         fetchMeetings();
       } else {
         // No chunks were processed or first chunk failed — transcribe final blob and save as a meeting
@@ -229,14 +229,14 @@ const Index = () => {
         }
         setAccumulatedTranscript("");
         setRecordingStartTime(0);
-        setCurrentMeetingId(null);
+        currentMeetingIdRef.current = null;
       }
     } catch (error) {
       console.error('Error processing recording:', error);
       toast.error("Failed to finalize recording");
       setAccumulatedTranscript("");
       setRecordingStartTime(0);
-      setCurrentMeetingId(null);
+      currentMeetingIdRef.current = null;
     } finally {
       setIsProcessing(false);
     }
@@ -319,7 +319,7 @@ const Index = () => {
                 setIsProcessing(false);
                 setAccumulatedTranscript("");
                 setRecordingStartTime(Date.now());
-                setCurrentMeetingId(null);
+                currentMeetingIdRef.current = null;
                 toast.info("Recording started - transcribing in 30s chunks");
               }}
             />
