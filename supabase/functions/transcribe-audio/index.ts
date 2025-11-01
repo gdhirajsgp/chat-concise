@@ -12,15 +12,32 @@ serve(async (req) => {
   }
 
   try {
-    const { audioBase64 } = await req.json();
+    const { audioBase64, mimeType } = await req.json();
     
     if (!audioBase64) {
       throw new Error('No audio data provided');
     }
 
-    console.log('Transcribing audio...');
+    // Determine content type and filename extension
+    const providedType = (mimeType as string | undefined)?.toLowerCase() || 'audio/webm';
+    const typeToExt: Record<string, string> = {
+      'audio/webm': 'webm',
+      'audio/m4a': 'm4a',
+      'audio/mp3': 'mp3',
+      'audio/mpeg': 'mpga',
+      'audio/wav': 'wav',
+      'audio/ogg': 'ogg',
+      'audio/oga': 'oga',
+      'audio/flac': 'flac',
+      // Some platforms report AAC even when wrapped in m4a; map to m4a which OpenAI supports
+      'audio/aac': 'm4a',
+    };
+    const ext = typeToExt[providedType] ?? 'webm';
+    const contentType = Object.keys(typeToExt).includes(providedType) ? providedType : 'audio/webm';
 
-    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY') || Deno.env.get('LOVABLE_API_KEY');
+    console.log(`Transcribing audio... type=${contentType} ext=${ext}`);
+
+    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
     if (!OPENAI_API_KEY) {
       throw new Error('OPENAI_API_KEY not configured');
     }
@@ -39,8 +56,8 @@ serve(async (req) => {
 
     // Prepare form data for Whisper API
     const formData = new FormData();
-    const blob = new Blob([bytes], { type: 'audio/webm' });
-    formData.append('file', blob, 'audio.webm');
+    const blob = new Blob([bytes], { type: contentType });
+    formData.append('file', new File([blob], `audio.${ext}`, { type: contentType }));
     formData.append('model', 'whisper-1');
 
     // Call OpenAI Whisper via Lovable AI Gateway

@@ -160,7 +160,7 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
         for (let i = 0; i < binaryString.length; i++) {
           bytes[i] = binaryString.charCodeAt(i);
         }
-        const blob = new Blob([bytes], { type: 'audio/aac' });
+        const blob = new Blob([bytes], { type: 'audio/m4a' });
         
         onRecordingComplete(blob, duration);
       } else {

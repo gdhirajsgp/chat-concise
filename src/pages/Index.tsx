@@ -68,7 +68,7 @@ const Index = () => {
         
         console.log('Sending chunk for transcription...');
         const { data, error } = await supabase.functions.invoke('transcribe-audio', {
-          body: { audioBase64: base64Audio }
+          body: { audioBase64: base64Audio, mimeType: audioBlob.type }
         });
 
         if (error) {
@@ -152,7 +152,7 @@ const Index = () => {
               const base64Audio = (reader.result as string).split(',')[1];
               
               const { data, error } = await supabase.functions.invoke('transcribe-audio', {
-                body: { audioBase64: base64Audio }
+                body: { audioBase64: base64Audio, mimeType: audioBlob.type }
               });
 
               if (!error && data?.transcript) {
