@@ -17,6 +17,10 @@ export default function SummaryWindow() {
       } else if (message.payload?.action === 'generate') {
         setIsGenerating(true);
       }
+    } else if (message.type === 'recording-stop') {
+      if (!summary) {
+        setIsGenerating(true);
+      }
     }
   });
 

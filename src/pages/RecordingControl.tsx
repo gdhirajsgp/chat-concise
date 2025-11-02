@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useBroadcastChannel, BroadcastMessage } from '@/hooks/useBroadcastChannel';
-import { Mic, Square, FileText, Sparkles } from 'lucide-react';
+import { Mic, Square, FileText, Sparkles, RefreshCw } from 'lucide-react';
 
 export default function RecordingControl() {
   const [isRecording, setIsRecording] = useState(false);
@@ -41,6 +41,10 @@ export default function RecordingControl() {
     postMessage({ type: 'recording-stop' });
   };
 
+  const handleRetryWindows = () => {
+    postMessage({ type: 'ensure-windows' });
+  };
+
   return (
     <div className="min-h-screen bg-background p-4 flex items-center justify-center">
       <Card className="w-full max-w-sm p-6 space-y-4">
@@ -57,6 +61,16 @@ export default function RecordingControl() {
         </div>
 
         <div className="space-y-2">
+          <Button
+            onClick={handleRetryWindows}
+            variant="outline"
+            size="sm"
+            className="w-full"
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Reopen Windows
+          </Button>
+
           <Button
             onClick={handleToggleTranscript}
             variant={showTranscript ? "default" : "outline"}

@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useRef } from 'react';
 
 export type BroadcastMessage = {
-  type: 'recording-start' | 'recording-stop' | 'transcript-update' | 'summary-update' | 'recording-time';
+  type: 'recording-start' | 'recording-stop' | 'transcript-update' | 'summary-update' | 'recording-time' | 'ensure-windows' | 'bring-main';
   payload?: any;
 };
 
