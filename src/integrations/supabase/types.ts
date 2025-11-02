@@ -23,6 +23,7 @@ export type Database = {
           summary: string | null
           title: string
           transcript: string | null
+          translated_transcript: string | null
           updated_at: string
           user_id: string
         }
@@ -34,6 +35,7 @@ export type Database = {
           summary?: string | null
           title: string
           transcript?: string | null
+          translated_transcript?: string | null
           updated_at?: string
           user_id: string
         }
@@ -45,6 +47,7 @@ export type Database = {
           summary?: string | null
           title?: string
           transcript?: string | null
+          translated_transcript?: string | null
           updated_at?: string
           user_id?: string
         }

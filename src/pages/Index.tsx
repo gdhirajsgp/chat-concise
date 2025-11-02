@@ -19,8 +19,10 @@ const Index = () => {
   const [manualTitle, setManualTitle] = useState("");
   const [manualTranscript, setManualTranscript] = useState("");
   const [accumulatedTranscript, setAccumulatedTranscript] = useState("");
+  const [accumulatedTranslatedTranscript, setAccumulatedTranslatedTranscript] = useState("");
   const [recordingStartTime, setRecordingStartTime] = useState<number>(0);
   const accumulatedTranscriptRef = useRef<string>("");
+  const accumulatedTranslatedTranscriptRef = useRef<string>("");
   const currentMeetingIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -81,10 +83,18 @@ const Index = () => {
         if (data?.transcript) {
           console.log('Chunk transcribed:', data.transcript.substring(0, 50));
           const newTranscript = data.transcript.trim();
+          const newTranslatedTranscript = (data.translatedTranscript || data.transcript).trim();
+          
           const prev = accumulatedTranscriptRef.current;
+          const prevTranslated = accumulatedTranslatedTranscriptRef.current;
+          
           const updatedTranscript = prev ? `${prev} ${newTranscript}` : newTranscript;
+          const updatedTranslatedTranscript = prevTranslated ? `${prevTranslated} ${newTranslatedTranscript}` : newTranslatedTranscript;
+          
           accumulatedTranscriptRef.current = updatedTranscript;
+          accumulatedTranslatedTranscriptRef.current = updatedTranslatedTranscript;
           setAccumulatedTranscript(updatedTranscript);
+          setAccumulatedTranslatedTranscript(updatedTranslatedTranscript);
           
           // If this is the first chunk, create a new meeting
           if (!currentMeetingIdRef.current) {
@@ -94,6 +104,7 @@ const Index = () => {
               .insert({
                 title: `Meeting ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
                 transcript: updatedTranscript,
+                translated_transcript: updatedTranslatedTranscript,
                 duration_seconds: duration,
                 user_id: user?.id
               })
@@ -116,6 +127,7 @@ const Index = () => {
               .from('meetings')
               .update({
                 transcript: updatedTranscript,
+                translated_transcript: updatedTranslatedTranscript,
                 duration_seconds: duration,
                 updated_at: new Date().toISOString()
               })
@@ -160,13 +172,16 @@ const Index = () => {
 
               if (!error && data?.transcript) {
                 const prev = accumulatedTranscriptRef.current;
+                const prevTranslated = accumulatedTranslatedTranscriptRef.current;
                 const finalTranscript = prev ? `${prev} ${data.transcript}` : data.transcript;
+                const finalTranslatedTranscript = prevTranslated ? `${prevTranslated} ${(data.translatedTranscript || data.transcript)}` : (data.translatedTranscript || data.transcript);
                 const actualDuration = Math.floor((Date.now() - recordingStartTime) / 1000);
                 
                 await supabase
                   .from('meetings')
                   .update({
                     transcript: finalTranscript,
+                    translated_transcript: finalTranslatedTranscript,
                     duration_seconds: actualDuration,
                     updated_at: new Date().toISOString()
                   })
@@ -179,7 +194,9 @@ const Index = () => {
         
         toast.success("Recording saved!");
         setAccumulatedTranscript("");
+        setAccumulatedTranslatedTranscript("");
         accumulatedTranscriptRef.current = "";
+        accumulatedTranslatedTranscriptRef.current = "";
         setRecordingStartTime(0);
         currentMeetingIdRef.current = null;
         fetchMeetings();
@@ -233,7 +250,9 @@ const Index = () => {
           toast.info('No audio captured');
         }
         setAccumulatedTranscript("");
+        setAccumulatedTranslatedTranscript("");
         accumulatedTranscriptRef.current = "";
+        accumulatedTranslatedTranscriptRef.current = "";
         setRecordingStartTime(0);
         currentMeetingIdRef.current = null;
       }
@@ -241,7 +260,9 @@ const Index = () => {
       console.error('Error processing recording:', error);
       toast.error("Failed to finalize recording");
       setAccumulatedTranscript("");
+      setAccumulatedTranslatedTranscript("");
       accumulatedTranscriptRef.current = "";
+      accumulatedTranslatedTranscriptRef.current = "";
       setRecordingStartTime(0);
       currentMeetingIdRef.current = null;
     } finally {
@@ -325,7 +346,9 @@ const Index = () => {
               onRecordingStart={() => {
                 setIsProcessing(false);
                 setAccumulatedTranscript("");
+                setAccumulatedTranslatedTranscript("");
                 accumulatedTranscriptRef.current = "";
+                accumulatedTranslatedTranscriptRef.current = "";
                 setRecordingStartTime(Date.now());
                 currentMeetingIdRef.current = null;
                 toast.info("Recording started - transcribing in 30s chunks");

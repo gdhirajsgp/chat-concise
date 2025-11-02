@@ -83,10 +83,52 @@ serve(async (req) => {
     }
 
     const result = await response.json();
+    const transcript = result.text;
+
     console.log('Transcription successful');
 
+    // Translate to English using Lovable AI
+    let translatedTranscript = transcript;
+    try {
+      const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+      if (LOVABLE_API_KEY) {
+        const translationResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-flash',
+            messages: [
+              {
+                role: 'system',
+                content: 'You are a professional translator. Translate the given text to English. If the text is already in English, return it as is. Only return the translated text, nothing else.'
+              },
+              {
+                role: 'user',
+                content: transcript
+              }
+            ],
+          }),
+        });
+
+        if (translationResponse.ok) {
+          const translationResult = await translationResponse.json();
+          translatedTranscript = translationResult.choices[0]?.message?.content || transcript;
+          console.log('Translation successful');
+        }
+      }
+    } catch (translationError) {
+      console.error('Translation error:', translationError);
+      // Continue with original transcript if translation fails
+    }
+
     return new Response(
-      JSON.stringify({ transcript: result.text }),
+      JSON.stringify({ 
+        transcript,
+        translatedTranscript 
+      }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
