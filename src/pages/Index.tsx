@@ -7,8 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { toast } from "sonner";
-import { Mic2, Plus, LogOut, FileText } from "lucide-react";
+import { Mic2, Plus, LogOut, FileText, ChevronDown, Sparkles } from "lucide-react";
+import { useDeviceType } from "@/hooks/useDeviceType";
+import { openRecordingWindows, closeRecordingWindows } from "@/lib/windowManager";
+import { useBroadcastChannel, BroadcastMessage } from "@/hooks/useBroadcastChannel";
 
 const Index = () => {
   const [user, setUser] = useState<any>(null);
@@ -21,9 +25,14 @@ const Index = () => {
   const [accumulatedTranscript, setAccumulatedTranscript] = useState("");
   const [accumulatedTranslatedTranscript, setAccumulatedTranslatedTranscript] = useState("");
   const [recordingStartTime, setRecordingStartTime] = useState<number>(0);
+  const [transcriptOpen, setTranscriptOpen] = useState(true);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [currentMeetingSummary, setCurrentMeetingSummary] = useState("");
+  const [generatingSummary, setGeneratingSummary] = useState(false);
   const accumulatedTranscriptRef = useRef<string>("");
   const accumulatedTranslatedTranscriptRef = useRef<string>("");
   const currentMeetingIdRef = useRef<string | null>(null);
+  const { isDesktop, isMobile } = useDeviceType();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -45,6 +54,15 @@ const Index = () => {
       fetchMeetings();
     }
   }, [user]);
+
+  const { postMessage } = useBroadcastChannel('recording-channel', (message: BroadcastMessage) => {
+    if (message.type === 'recording-stop') {
+      // Trigger stop from control window
+      setIsProcessing(false);
+    } else if (message.type === 'summary-update' && message.payload?.action === 'request') {
+      handleGenerateCurrentSummary();
+    }
+  });
 
   const fetchMeetings = async () => {
     const { data, error } = await supabase
@@ -95,6 +113,14 @@ const Index = () => {
           accumulatedTranslatedTranscriptRef.current = updatedTranslatedTranscript;
           setAccumulatedTranscript(updatedTranscript);
           setAccumulatedTranslatedTranscript(updatedTranslatedTranscript);
+          
+          // Broadcast to desktop windows
+          if (isDesktop) {
+            postMessage({
+              type: 'transcript-update',
+              payload: { text: updatedTranslatedTranscript, original: updatedTranscript }
+            });
+          }
           
           // If this is the first chunk, create a new meeting
           if (!currentMeetingIdRef.current) {
@@ -299,6 +325,46 @@ const Index = () => {
     }
   };
 
+  const handleGenerateCurrentSummary = async () => {
+    if (!currentMeetingIdRef.current || !accumulatedTranslatedTranscriptRef.current) {
+      toast.error("No active recording to summarize");
+      return;
+    }
+
+    setGeneratingSummary(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('summarize-meeting', {
+        body: { transcript: accumulatedTranslatedTranscriptRef.current }
+      });
+
+      if (error) throw error;
+
+      const summary = data.summary;
+      setCurrentMeetingSummary(summary);
+      
+      // Update the meeting record
+      await supabase
+        .from('meetings')
+        .update({ summary })
+        .eq('id', currentMeetingIdRef.current);
+
+      // Broadcast to desktop windows
+      if (isDesktop) {
+        postMessage({
+          type: 'summary-update',
+          payload: { summary }
+        });
+      }
+
+      toast.success("Summary generated!");
+    } catch (error) {
+      console.error('Error generating summary:', error);
+      toast.error("Failed to generate summary");
+    } finally {
+      setGeneratingSummary(false);
+    }
+  };
+
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     toast.success("Signed out successfully");
@@ -341,17 +407,32 @@ const Index = () => {
           <div className="text-center space-y-6 py-8">
             <h2 className="text-3xl font-bold">Record Your Meeting</h2>
             <RecordingButton 
-              onRecordingComplete={handleRecordingComplete}
+              onRecordingComplete={(blob, duration) => {
+                handleRecordingComplete(blob, duration);
+                if (isDesktop) {
+                  closeRecordingWindows();
+                  postMessage({ type: 'recording-stop' });
+                }
+              }}
               onChunkReady={handleChunkReady}
               onRecordingStart={() => {
                 setIsProcessing(false);
                 setAccumulatedTranscript("");
                 setAccumulatedTranslatedTranscript("");
+                setCurrentMeetingSummary("");
                 accumulatedTranscriptRef.current = "";
                 accumulatedTranslatedTranscriptRef.current = "";
                 setRecordingStartTime(Date.now());
                 currentMeetingIdRef.current = null;
-                toast.info("Recording started - transcribing in 30s chunks");
+                
+                if (isDesktop) {
+                  openRecordingWindows();
+                  postMessage({ type: 'recording-start' });
+                  toast.info("Recording windows opened - transcribing in 30s chunks");
+                } else {
+                  toast.info("Recording started - transcribing in 30s chunks");
+                  setTranscriptOpen(true);
+                }
               }}
             />
             {isProcessing && (
@@ -391,6 +472,59 @@ const Index = () => {
               </DialogContent>
             </Dialog>
           </div>
+
+          {/* Mobile Live Transcript & Summary */}
+          {!isDesktop && accumulatedTranslatedTranscript && (
+            <div className="space-y-4">
+              <Collapsible open={transcriptOpen} onOpenChange={setTranscriptOpen}>
+                <CollapsibleTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between">
+                    <span className="flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
+                      Live Transcript
+                    </span>
+                    <ChevronDown className={`h-4 w-4 transition-transform ${transcriptOpen ? 'rotate-180' : ''}`} />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="mt-2 p-4 bg-card rounded-lg border border-border max-h-64 overflow-y-auto">
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                      {accumulatedTranslatedTranscript}
+                    </p>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+
+              <Collapsible open={summaryOpen} onOpenChange={setSummaryOpen}>
+                <CollapsibleTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between">
+                    <span className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4" />
+                      AI Summary
+                    </span>
+                    <ChevronDown className={`h-4 w-4 transition-transform ${summaryOpen ? 'rotate-180' : ''}`} />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="mt-2 p-4 bg-card rounded-lg border border-border">
+                    {currentMeetingSummary ? (
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                        {currentMeetingSummary}
+                      </p>
+                    ) : (
+                      <Button
+                        onClick={handleGenerateCurrentSummary}
+                        disabled={generatingSummary}
+                        className="w-full"
+                      >
+                        {generatingSummary ? "Generating..." : "Generate AI Summary"}
+                      </Button>
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            </div>
+          )}
 
           {/* Meetings List */}
           <div className="space-y-4">

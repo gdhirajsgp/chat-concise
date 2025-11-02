@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Capacitor } from "@capacitor/core";
 import { VoiceRecorder } from "capacitor-voice-recorder";
+import { useBroadcastChannel } from "@/hooks/useBroadcastChannel";
+import { useDeviceType } from "@/hooks/useDeviceType";
 
 interface RecordingButtonProps {
   onRecordingComplete: (audioBlob: Blob, duration: number) => void;
@@ -22,6 +24,19 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
   const chunkIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isRecordingRef = useRef(false);
   const CHUNK_DURATION = 30000; // 30 seconds in milliseconds
+  const { isDesktop } = useDeviceType();
+  const { postMessage } = useBroadcastChannel('recording-channel', (message) => {
+    if (message.type === 'recording-stop' && isDesktop) {
+      stopRecording();
+    }
+  });
+
+  useEffect(() => {
+    // Broadcast recording time to desktop windows
+    if (isDesktop && isRecording) {
+      postMessage({ type: 'recording-time', payload: recordingTime });
+    }
+  }, [recordingTime, isDesktop, isRecording, postMessage]);
 
   useEffect(() => {
     return () => {
