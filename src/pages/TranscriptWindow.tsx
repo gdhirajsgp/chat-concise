@@ -21,6 +21,8 @@ export default function TranscriptWindow() {
           scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
       }, 100);
+    } else if (message.type === 'recording-stop') {
+      // Keep window open so user can review transcript
     }
   });
 

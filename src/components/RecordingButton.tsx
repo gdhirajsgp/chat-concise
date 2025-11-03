@@ -24,6 +24,9 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
   const chunkIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isRecordingRef = useRef(false);
   const CHUNK_DURATION = 30000; // 30 seconds in milliseconds
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioLevelIntervalRef = useRef<number | null>(null);
   const { isDesktop } = useDeviceType();
   const { postMessage } = useBroadcastChannel('recording-channel', (message) => {
     if (message.type === 'recording-stop' && isDesktop) {
@@ -42,6 +45,8 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (chunkIntervalRef.current) clearTimeout(chunkIntervalRef.current);
+      if (audioLevelIntervalRef.current) cancelAnimationFrame(audioLevelIntervalRef.current);
+      if (audioContextRef.current) audioContextRef.current.close();
     };
   }, []);
 
@@ -102,6 +107,40 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
       setIsRecording(true);
       setRecordingTime(0);
       timerRef.current = setInterval(() => setRecordingTime((p) => p + 1), 1000);
+
+      // Setup audio level detection for desktop
+      if (isDesktop) {
+        try {
+          const audioContext = new AudioContext();
+          const analyser = audioContext.createAnalyser();
+          const source = audioContext.createMediaStreamSource(stream);
+          
+          analyser.fftSize = 256;
+          analyser.smoothingTimeConstant = 0.8;
+          source.connect(analyser);
+          
+          audioContextRef.current = audioContext;
+          analyserRef.current = analyser;
+
+          const dataArray = new Uint8Array(analyser.frequencyBinCount);
+          
+          const detectAudioLevel = () => {
+            if (!isRecordingRef.current || !analyserRef.current) return;
+            
+            analyserRef.current.getByteFrequencyData(dataArray);
+            const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+            const normalizedLevel = Math.min(100, (average / 255) * 100);
+            
+            postMessage({ type: 'audio-level', payload: normalizedLevel });
+            
+            audioLevelIntervalRef.current = requestAnimationFrame(detectAudioLevel);
+          };
+          
+          detectAudioLevel();
+        } catch (error) {
+          console.error('Error setting up audio level detection:', error);
+        }
+      }
 
       const startNewRecorder = () => {
         if (!isRecordingRef.current || !streamRef.current) return;
@@ -198,6 +237,14 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
         if (chunkIntervalRef.current) {
           clearTimeout(chunkIntervalRef.current);
           chunkIntervalRef.current = null;
+        }
+        if (audioLevelIntervalRef.current) {
+          cancelAnimationFrame(audioLevelIntervalRef.current);
+          audioLevelIntervalRef.current = null;
+        }
+        if (audioContextRef.current) {
+          audioContextRef.current.close();
+          audioContextRef.current = null;
         }
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
           mediaRecorderRef.current.stop();

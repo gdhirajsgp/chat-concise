@@ -29,8 +29,6 @@ const Index = () => {
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [currentMeetingSummary, setCurrentMeetingSummary] = useState("");
   const [generatingSummary, setGeneratingSummary] = useState(false);
-  const [isSoftMinimized, setIsSoftMinimized] = useState(false);
-  const [popupsBlocked, setPopupsBlocked] = useState(false);
   const accumulatedTranscriptRef = useRef<string>("");
   const accumulatedTranslatedTranscriptRef = useRef<string>("");
   const currentMeetingIdRef = useRef<string | null>(null);
@@ -61,13 +59,13 @@ const Index = () => {
     if (message.type === 'recording-stop') {
       // Trigger stop from control window
       setIsProcessing(false);
+      closeRecordingWindows();
     } else if (message.type === 'summary-update' && message.payload?.action === 'request') {
       handleGenerateCurrentSummary();
-    } else if (message.type === 'ensure-windows') {
-      handleRetryOpenWindows();
+    } else if (message.type === 'summary-generate') {
+      handleGenerateCurrentSummary();
     } else if (message.type === 'bring-main') {
       window.focus();
-      setIsSoftMinimized(false);
     }
   });
 
@@ -372,15 +370,6 @@ const Index = () => {
     }
   };
 
-  const handleRetryOpenWindows = () => {
-    const { openRecordingWindows: ensureWindowsOpen } = require('@/lib/windowManager');
-    const refs = ensureWindowsOpen();
-    const hasBlocked = !refs.control || !refs.transcript || !refs.summary;
-    setPopupsBlocked(hasBlocked);
-    if (!hasBlocked) {
-      toast.success("All windows opened!");
-    }
-  };
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -399,32 +388,6 @@ const Index = () => {
     return <Auth />;
   }
 
-  // Soft-minimized state during desktop recording
-  if (isSoftMinimized && isDesktop) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-background flex items-center justify-center">
-        <div className="max-w-md mx-auto text-center space-y-6 p-8">
-          <div className="w-20 h-20 bg-gradient-to-br from-primary to-primary-glow rounded-full flex items-center justify-center mx-auto shadow-[var(--shadow-glow)] animate-pulse">
-            <Mic2 className="h-10 w-10 text-white" />
-          </div>
-          <h2 className="text-2xl font-bold">Recording in Progress</h2>
-          <p className="text-muted-foreground">
-            Your recording is being transcribed in separate windows. Check the Control window to manage your recording.
-          </p>
-          {popupsBlocked && (
-            <div className="mt-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
-              <p className="text-sm text-destructive mb-2">
-                Some windows were blocked. Please enable pop-ups for this site.
-              </p>
-              <Button onClick={handleRetryOpenWindows} variant="outline" size="sm">
-                Try Again
-              </Button>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-background">
@@ -479,7 +442,6 @@ const Index = () => {
                   closeRecordingWindows();
                   postMessage({ type: 'recording-stop' });
                   postMessage({ type: 'bring-main' });
-                  setIsSoftMinimized(false);
                   window.focus();
                   fetchMeetings();
                   toast.success("Recording saved! Transcript and summary ready.");
@@ -497,20 +459,9 @@ const Index = () => {
                 currentMeetingIdRef.current = null;
                 
                 if (isDesktop) {
-                  const refs = openRecordingWindows();
-                  const hasBlocked = !refs.control || !refs.transcript || !refs.summary;
-                  setPopupsBlocked(hasBlocked);
-                  
-                  if (hasBlocked) {
-                    toast.error("Some windows were blocked. Please enable pop-ups and click 'Try Again' in the recording screen.", {
-                      duration: 5000,
-                    });
-                  } else {
-                    toast.success("Recording windows opened!");
-                  }
-                  
+                  openRecordingWindows();
                   postMessage({ type: 'recording-start' });
-                  setIsSoftMinimized(true);
+                  toast.success("Recording control window opened!");
                 } else {
                   toast.info("Recording started - transcribing in 30s chunks");
                   setTranscriptOpen(true);

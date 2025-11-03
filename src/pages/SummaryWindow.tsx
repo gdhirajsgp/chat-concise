@@ -17,10 +17,10 @@ export default function SummaryWindow() {
       } else if (message.payload?.action === 'generate') {
         setIsGenerating(true);
       }
+    } else if (message.type === 'summary-generate') {
+      setIsGenerating(true);
     } else if (message.type === 'recording-stop') {
-      if (!summary) {
-        setIsGenerating(true);
-      }
+      // Keep window open so user can review summary
     }
   });
 
