@@ -18,6 +18,18 @@ serve(async (req) => {
       throw new Error('No audio data provided');
     }
 
+    // Validate audio data type
+    if (typeof audioBase64 !== 'string') {
+      throw new Error('Invalid audio data format');
+    }
+
+    // Validate audio data size (max 25MB base64 = ~33.3MB binary)
+    // Base64 encoding increases size by ~33%, so 25MB binary ≈ 33.3MB base64
+    const maxBase64Size = 25 * 1024 * 1024 * 4 / 3; // ~33.3MB
+    if (audioBase64.length > maxBase64Size) {
+      throw new Error('Audio file too large (max 25MB)');
+    }
+
     // Normalize and map content type to a safe filename extension
     const rawType = (mimeType as string | undefined)?.toLowerCase() || 'audio/webm';
     const baseType = rawType.split(';')[0].trim();

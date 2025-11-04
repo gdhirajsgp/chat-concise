@@ -18,6 +18,15 @@ serve(async (req) => {
       throw new Error('No transcript provided');
     }
 
+    // Validate transcript length (max 50,000 characters)
+    if (typeof transcript !== 'string') {
+      throw new Error('Invalid transcript format');
+    }
+    
+    if (transcript.length > 50000) {
+      throw new Error('Transcript too long (max 50,000 characters)');
+    }
+
     console.log('Summarizing meeting transcript...');
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');

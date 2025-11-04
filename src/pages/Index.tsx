@@ -9,6 +9,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Mic2, Plus, LogOut, FileText } from "lucide-react";
+import { z } from "zod";
+
+const meetingInputSchema = z.object({
+  title: z.string().trim().min(1, 'Title is required').max(200, 'Title must be less than 200 characters'),
+  transcript: z.string().trim().min(1, 'Transcript is required').max(100000, 'Transcript must be less than 100,000 characters')
+});
 
 const Index = () => {
   const [user, setUser] = useState<any>(null);
@@ -271,8 +277,14 @@ const Index = () => {
   };
 
   const handleManualSubmit = async () => {
-    if (!manualTitle || !manualTranscript) {
-      toast.error("Please fill in all fields");
+    // Validate input
+    const result = meetingInputSchema.safeParse({ 
+      title: manualTitle, 
+      transcript: manualTranscript 
+    });
+    
+    if (!result.success) {
+      toast.error(result.error.errors[0].message);
       return;
     }
 
@@ -281,8 +293,8 @@ const Index = () => {
         .from('meetings')
         .insert({
           user_id: user.id,
-          title: manualTitle,
-          transcript: manualTranscript,
+          title: result.data.title,
+          transcript: result.data.transcript,
           duration_seconds: 0,
         });
 
@@ -376,12 +388,14 @@ const Index = () => {
                     placeholder="Meeting title"
                     value={manualTitle}
                     onChange={(e) => setManualTitle(e.target.value)}
+                    maxLength={200}
                   />
                   <Textarea
                     placeholder="Enter your meeting notes here..."
                     value={manualTranscript}
                     onChange={(e) => setManualTranscript(e.target.value)}
                     rows={8}
+                    maxLength={100000}
                   />
                   <Button onClick={handleManualSubmit} className="w-full">
                     <Plus className="h-4 w-4 mr-2" />
