@@ -363,7 +363,7 @@ const Index = () => {
                 accumulatedTranslatedTranscriptRef.current = "";
                 setRecordingStartTime(Date.now());
                 currentMeetingIdRef.current = null;
-                toast.info("Recording started - transcribing in 30s chunks");
+                toast.info("Recording started - transcribing in 10s chunks");
               }}
             />
             {isProcessing && (

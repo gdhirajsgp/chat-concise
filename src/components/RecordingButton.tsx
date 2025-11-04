@@ -21,7 +21,7 @@ export const RecordingButton = ({ onRecordingComplete, onRecordingStart, onChunk
   const streamRef = useRef<MediaStream | null>(null);
   const chunkIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isRecordingRef = useRef(false);
-  const CHUNK_DURATION = 30000; // 30 seconds in milliseconds
+  const CHUNK_DURATION = 10000; // 10 seconds in milliseconds
 
   useEffect(() => {
     return () => {
