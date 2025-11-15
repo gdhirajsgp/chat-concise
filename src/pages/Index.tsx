@@ -77,8 +77,27 @@ const Index = () => {
         const chunkStartTime = Date.now();
         
         console.log('Sending chunk for transcription...');
+          
+          // Get existing speaker mappings to maintain consistency
+          let existingSpeakerMappings = {};
+          if (currentMeetingIdRef.current) {
+            const { data: existingMeeting } = await supabase
+              .from('meetings')
+              .select('speaker_mappings')
+              .eq('id', currentMeetingIdRef.current)
+              .single();
+            
+            if (existingMeeting?.speaker_mappings) {
+              existingSpeakerMappings = existingMeeting.speaker_mappings;
+            }
+          }
+          
           const { data, error } = await supabase.functions.invoke('transcribe-audio', {
-            body: { audioBase64: base64Audio, mimeType: (audioBlob.type?.split(';')[0] || 'audio/webm') }
+            body: { 
+              audioBase64: base64Audio, 
+              mimeType: (audioBlob.type?.split(';')[0] || 'audio/webm'),
+              existingSpeakerMappings
+            }
           });
 
         if (error) {

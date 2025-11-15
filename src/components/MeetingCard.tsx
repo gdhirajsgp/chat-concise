@@ -87,6 +87,21 @@ export const MeetingCard = ({ meeting, onDelete, onSummaryGenerated }: MeetingCa
     setEditValue('');
   };
 
+  // Apply speaker mappings to formatted transcript for display
+  const getDisplayTranscript = (transcript: string | null) => {
+    if (!transcript) return '';
+    
+    let displayText = transcript;
+    // Replace speaker labels with actual names from mappings
+    Object.entries(speakerMappings).forEach(([_, speakerName]) => {
+      // Match [Speaker X] pattern and replace with actual name
+      const regex = new RegExp(`\\[(${speakerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\]`, 'g');
+      displayText = displayText.replace(regex, `[${speakerName}]`);
+    });
+    
+    return displayText;
+  };
+
   const handleDelete = async () => {
     try {
       const { error } = await supabase
@@ -197,16 +212,18 @@ export const MeetingCard = ({ meeting, onDelete, onSummaryGenerated }: MeetingCa
             </div>
             <p className="text-sm text-muted-foreground whitespace-pre-wrap">
               {(() => {
-                const displayTranscript = showOriginal 
+                const rawTranscript = showOriginal 
                   ? meeting.transcript 
                   : (meeting.formatted_transcript || meeting.translated_transcript || meeting.transcript);
+                const displayTranscript = getDisplayTranscript(rawTranscript);
                 if (!displayTranscript) return '';
                 return showFullTranscript ? displayTranscript : displayTranscript.slice(0, 200);
               })()}
               {(() => {
-                const displayTranscript = showOriginal 
+                const rawTranscript = showOriginal 
                   ? meeting.transcript 
                   : (meeting.formatted_transcript || meeting.translated_transcript || meeting.transcript);
+                const displayTranscript = getDisplayTranscript(rawTranscript);
                 return displayTranscript && displayTranscript.length > 200 && (
                   <button
                     onClick={() => setShowFullTranscript(!showFullTranscript)}
