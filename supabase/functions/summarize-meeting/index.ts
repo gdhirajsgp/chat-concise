@@ -45,7 +45,22 @@ serve(async (req) => {
         messages: [
           {
             role: 'system',
-            content: 'You are an expert at summarizing meeting transcripts. Create concise, actionable summaries that highlight key points, decisions, and action items.'
+            content: `You are an expert meeting summarizer. Create a comprehensive summary of the meeting transcript with speaker attribution.
+
+Format your response as follows:
+
+## Summary
+[Overall meeting summary in 2-3 sentences]
+
+## Key Decisions
+- [Decision 1 with speaker who made it]
+- [Decision 2 with speaker who made it]
+
+## Action Items
+- [Action item 1] - Owner: [Speaker name]
+- [Action item 2] - Owner: [Speaker name]
+
+Use the speaker labels (e.g., [Speaker A], [Speaker B]) provided in the transcript to attribute decisions and actions to the correct person.`
           },
           {
             role: 'user',

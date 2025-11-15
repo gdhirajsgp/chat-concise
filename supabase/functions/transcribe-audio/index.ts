@@ -54,7 +54,8 @@ serve(async (req) => {
     const ext = typeToExt[baseType] ?? 'webm';
     const contentType = (baseType in typeToExt) ? baseType : 'audio/webm';
 
-    console.log(`Transcribing audio... rawType=${rawType} baseType=${baseType} useType=${contentType} ext=${ext}`);
+    const startTime = Date.now();
+    console.log(`Transcribing audio with diarization... rawType=${rawType} baseType=${baseType} useType=${contentType} ext=${ext}`);
 
     const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
     if (!OPENAI_API_KEY) {
@@ -73,11 +74,12 @@ serve(async (req) => {
       bytes[i] = binaryString.charCodeAt(i);
     }
 
-    // Prepare form data for Whisper API
+    // Prepare form data for Whisper API with diarization
     const formData = new FormData();
     const blob = new Blob([bytes], { type: contentType });
     formData.append('file', new File([blob], `audio.${ext}`, { type: contentType }));
-    formData.append('model', 'whisper-1');
+    formData.append('model', 'gpt-4o-transcribe-diarize');
+    formData.append('response_format', 'diarized_json');
 
     // Call OpenAI Whisper via Lovable AI Gateway
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -95,15 +97,37 @@ serve(async (req) => {
     }
 
     const result = await response.json();
-    const transcript = result.text;
+    const endTime = Date.now();
+    const transcriptionTimeMs = endTime - startTime;
+    
+    // Extract diarized segments and plain text
+    const diarizedSegments = result.segments || [];
+    const transcript = result.text || '';
 
-    console.log('Transcription successful');
+    console.log(`Transcription successful in ${transcriptionTimeMs}ms with ${diarizedSegments.length} segments`);
 
-    // Translate to English using Lovable AI
-    let translatedTranscript = transcript;
+    // Build formatted transcript with speaker labels
+    let formattedTranscript = '';
+    const speakerMap: Record<string, string> = {};
+    
+    for (const segment of diarizedSegments) {
+      const speakerId = segment.speaker || 'speaker_unknown';
+      
+      // Create default speaker label if not exists
+      if (!speakerMap[speakerId]) {
+        const speakerIndex = Object.keys(speakerMap).length;
+        speakerMap[speakerId] = `Speaker ${String.fromCharCode(65 + speakerIndex)}`; // A, B, C, etc.
+      }
+      
+      const speakerLabel = speakerMap[speakerId];
+      formattedTranscript += `[${speakerLabel}] ${segment.text}\n`;
+    }
+
+    // Translate formatted transcript to English using Lovable AI
+    let translatedFormattedTranscript = formattedTranscript;
     try {
       const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-      if (LOVABLE_API_KEY) {
+      if (LOVABLE_API_KEY && formattedTranscript) {
         const translationResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -115,11 +139,11 @@ serve(async (req) => {
             messages: [
               {
                 role: 'system',
-                content: 'You are a professional translator. Translate the given text to English. If the text is already in English, return it as is. Only return the translated text, nothing else.'
+                content: 'You are a professional translator. Translate the given text to English while preserving speaker labels [Speaker A], [Speaker B], etc. If the text is already in English, return it as is. Only return the translated text, nothing else.'
               },
               {
                 role: 'user',
-                content: transcript
+                content: formattedTranscript
               }
             ],
           }),
@@ -127,19 +151,24 @@ serve(async (req) => {
 
         if (translationResponse.ok) {
           const translationResult = await translationResponse.json();
-          translatedTranscript = translationResult.choices[0]?.message?.content || transcript;
+          translatedFormattedTranscript = translationResult.choices[0]?.message?.content || formattedTranscript;
           console.log('Translation successful');
         }
       }
     } catch (translationError) {
       console.error('Translation error:', translationError);
-      // Continue with original transcript if translation fails
+      // Continue with original formatted transcript if translation fails
     }
 
     return new Response(
       JSON.stringify({ 
         transcript,
-        translatedTranscript 
+        translatedTranscript: translatedFormattedTranscript,
+        diarizedSegments,
+        formattedTranscript,
+        translatedFormattedTranscript,
+        speakerMap,
+        transcriptionTimeMs
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
