@@ -11,9 +11,14 @@ interface Meeting {
   title: string;
   transcript: string | null;
   translated_transcript: string | null;
+  formatted_transcript: string | null;
   summary: string | null;
   duration_seconds: number;
   created_at: string;
+  speaker_mappings: Record<string, string> | null;
+  diarized_segments: any[] | null;
+  audio_length_seconds: number | null;
+  transcription_time_ms: number | null;
 }
 
 interface MeetingCardProps {
@@ -26,9 +31,13 @@ export const MeetingCard = ({ meeting, onDelete, onSummaryGenerated }: MeetingCa
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [showFullTranscript, setShowFullTranscript] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
+  const [speakerMappings, setSpeakerMappings] = useState<Record<string, string>>(meeting.speaker_mappings || {});
+  const [editingSpeaker, setEditingSpeaker] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
 
   const handleGenerateSummary = async () => {
-    const transcriptToSummarize = meeting.translated_transcript || meeting.transcript;
+    // Use formatted transcript with speaker labels if available
+    const transcriptToSummarize = meeting.formatted_transcript || meeting.translated_transcript || meeting.transcript;
     if (!transcriptToSummarize) {
       toast.error("No transcript available to summarize");
       return;
@@ -55,6 +64,27 @@ export const MeetingCard = ({ meeting, onDelete, onSummaryGenerated }: MeetingCa
     } finally {
       setIsGeneratingSummary(false);
     }
+  };
+
+  const handleRenameSpeaker = async (speakerId: string, newName: string) => {
+    const updatedMappings = { ...speakerMappings, [speakerId]: newName };
+    setSpeakerMappings(updatedMappings);
+    
+    try {
+      await supabase
+        .from('meetings')
+        .update({ speaker_mappings: updatedMappings })
+        .eq('id', meeting.id);
+      
+      toast.success("Speaker renamed");
+      onSummaryGenerated(); // Refresh to show updated names
+    } catch (error) {
+      console.error('Error renaming speaker:', error);
+      toast.error("Failed to rename speaker");
+    }
+    
+    setEditingSpeaker(null);
+    setEditValue('');
   };
 
   const handleDelete = async () => {
@@ -105,7 +135,47 @@ export const MeetingCard = ({ meeting, onDelete, onSummaryGenerated }: MeetingCa
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {(meeting.translated_transcript || meeting.transcript) && (
+        {/* Speaker Mappings */}
+        {meeting.speaker_mappings && Object.keys(meeting.speaker_mappings).length > 0 && (
+          <div className="bg-secondary/20 p-3 rounded-lg">
+            <h4 className="font-semibold text-sm mb-2">Speakers</h4>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(speakerMappings).map(([speakerId, speakerName]) => (
+                <div key={speakerId} className="flex items-center gap-2">
+                  {editingSpeaker === speakerId ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleRenameSpeaker(speakerId, editValue);
+                          if (e.key === 'Escape') { setEditingSpeaker(null); setEditValue(''); }
+                        }}
+                        className="text-xs px-2 py-1 border rounded w-24"
+                        autoFocus
+                      />
+                      <Button size="sm" variant="ghost" onClick={() => handleRenameSpeaker(speakerId, editValue)} className="h-6 px-2">
+                        ✓
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => { setEditingSpeaker(speakerId); setEditValue(speakerName); }}
+                      className="text-xs h-7"
+                    >
+                      {speakerName} ✏️
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {(meeting.formatted_transcript || meeting.translated_transcript || meeting.transcript) && (
           <div>
             <div className="flex items-center gap-2 mb-2 justify-between">
               <div className="flex items-center gap-2">
@@ -127,12 +197,16 @@ export const MeetingCard = ({ meeting, onDelete, onSummaryGenerated }: MeetingCa
             </div>
             <p className="text-sm text-muted-foreground whitespace-pre-wrap">
               {(() => {
-                const displayTranscript = showOriginal ? meeting.transcript : (meeting.translated_transcript || meeting.transcript);
+                const displayTranscript = showOriginal 
+                  ? meeting.transcript 
+                  : (meeting.formatted_transcript || meeting.translated_transcript || meeting.transcript);
                 if (!displayTranscript) return '';
                 return showFullTranscript ? displayTranscript : displayTranscript.slice(0, 200);
               })()}
               {(() => {
-                const displayTranscript = showOriginal ? meeting.transcript : (meeting.translated_transcript || meeting.transcript);
+                const displayTranscript = showOriginal 
+                  ? meeting.transcript 
+                  : (meeting.formatted_transcript || meeting.translated_transcript || meeting.transcript);
                 return displayTranscript && displayTranscript.length > 200 && (
                   <button
                     onClick={() => setShowFullTranscript(!showFullTranscript)}
@@ -152,7 +226,18 @@ export const MeetingCard = ({ meeting, onDelete, onSummaryGenerated }: MeetingCa
               <Sparkles className="h-4 w-4 text-primary" />
               <h4 className="font-semibold text-primary">AI Summary</h4>
             </div>
-            <p className="text-sm whitespace-pre-wrap">{meeting.summary}</p>
+            <div className="text-sm whitespace-pre-wrap prose prose-sm max-w-none">
+              {meeting.summary.split('\n').map((line, i) => (
+                <p key={i}>{line}</p>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Performance metrics */}
+        {meeting.audio_length_seconds && meeting.transcription_time_ms && (
+          <div className="text-xs text-muted-foreground">
+            Transcription: {meeting.audio_length_seconds}s audio processed in {meeting.transcription_time_ms}ms
           </div>
         )}
 

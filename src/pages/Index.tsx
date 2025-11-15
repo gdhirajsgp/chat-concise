@@ -74,6 +74,7 @@ const Index = () => {
       
       reader.onloadend = async () => {
         const base64Audio = (reader.result as string).split(',')[1];
+        const chunkStartTime = Date.now();
         
         console.log('Sending chunk for transcription...');
           const { data, error } = await supabase.functions.invoke('transcribe-audio', {
@@ -86,21 +87,51 @@ const Index = () => {
           return;
         }
 
-        if (data?.transcript) {
-          console.log('Chunk transcribed:', data.transcript.substring(0, 50));
+        if (data?.translatedFormattedTranscript) {
+          console.log('Chunk transcribed with diarization');
           const newTranscript = data.transcript.trim();
-          const newTranslatedTranscript = (data.translatedTranscript || data.transcript).trim();
+          const newFormattedTranscript = data.translatedFormattedTranscript.trim();
           
           const prev = accumulatedTranscriptRef.current;
           const prevTranslated = accumulatedTranslatedTranscriptRef.current;
           
           const updatedTranscript = prev ? `${prev} ${newTranscript}` : newTranscript;
-          const updatedTranslatedTranscript = prevTranslated ? `${prevTranslated} ${newTranslatedTranscript}` : newTranslatedTranscript;
+          const updatedFormattedTranscript = prevTranslated ? `${prevTranslated}\n${newFormattedTranscript}` : newFormattedTranscript;
           
           accumulatedTranscriptRef.current = updatedTranscript;
-          accumulatedTranslatedTranscriptRef.current = updatedTranslatedTranscript;
+          accumulatedTranslatedTranscriptRef.current = updatedFormattedTranscript;
           setAccumulatedTranscript(updatedTranscript);
-          setAccumulatedTranslatedTranscript(updatedTranslatedTranscript);
+          setAccumulatedTranslatedTranscript(updatedFormattedTranscript);
+
+          // Get existing meeting data to preserve speaker mappings
+          let existingSpeakerMappings = {};
+          let existingDiarizedSegments = [];
+          
+          if (currentMeetingIdRef.current) {
+            const { data: existingMeeting } = await supabase
+              .from('meetings')
+              .select('speaker_mappings, diarized_segments')
+              .eq('id', currentMeetingIdRef.current)
+              .single();
+            
+            if (existingMeeting) {
+              existingSpeakerMappings = existingMeeting.speaker_mappings || {};
+              existingDiarizedSegments = Array.isArray(existingMeeting.diarized_segments) 
+                ? existingMeeting.diarized_segments 
+                : [];
+            }
+          }
+
+          // Merge speaker mappings (preserve user renames)
+          const mergedSpeakerMappings = { ...data.speakerMap, ...existingSpeakerMappings };
+          
+          // Append new diarized segments
+          const updatedDiarizedSegments = [...existingDiarizedSegments, ...(data.diarizedSegments || [])];
+
+          const audioLengthSeconds = Math.floor(audioBlob.size / (16000 * 2)); // Rough estimate
+          const transcriptionTimeMs = data.transcriptionTimeMs || (Date.now() - chunkStartTime);
+          
+          console.log(`Transcription metrics: ${audioLengthSeconds}s audio processed in ${transcriptionTimeMs}ms`);
           
           // If this is the first chunk, create a new meeting
           if (!currentMeetingIdRef.current) {
@@ -110,8 +141,13 @@ const Index = () => {
               .insert({
                 title: `Meeting ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
                 transcript: updatedTranscript,
-                translated_transcript: updatedTranslatedTranscript,
+                translated_transcript: updatedFormattedTranscript,
+                formatted_transcript: updatedFormattedTranscript,
+                diarized_segments: updatedDiarizedSegments,
+                speaker_mappings: mergedSpeakerMappings,
                 duration_seconds: duration,
+                audio_length_seconds: audioLengthSeconds,
+                transcription_time_ms: transcriptionTimeMs,
                 user_id: user?.id
               })
               .select()
@@ -133,8 +169,13 @@ const Index = () => {
               .from('meetings')
               .update({
                 transcript: updatedTranscript,
-                translated_transcript: updatedTranslatedTranscript,
+                translated_transcript: updatedFormattedTranscript,
+                formatted_transcript: updatedFormattedTranscript,
+                diarized_segments: updatedDiarizedSegments,
+                speaker_mappings: mergedSpeakerMappings,
                 duration_seconds: duration,
+                audio_length_seconds: audioLengthSeconds,
+                transcription_time_ms: transcriptionTimeMs,
                 updated_at: new Date().toISOString()
               })
               .eq('id', currentMeetingIdRef.current);

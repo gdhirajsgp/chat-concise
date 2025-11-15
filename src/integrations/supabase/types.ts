@@ -16,37 +16,52 @@ export type Database = {
     Tables: {
       meetings: {
         Row: {
+          audio_length_seconds: number | null
           audio_url: string | null
           created_at: string
+          diarized_segments: Json | null
           duration_seconds: number | null
+          formatted_transcript: string | null
           id: string
+          speaker_mappings: Json | null
           summary: string | null
           title: string
           transcript: string | null
+          transcription_time_ms: number | null
           translated_transcript: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          audio_length_seconds?: number | null
           audio_url?: string | null
           created_at?: string
+          diarized_segments?: Json | null
           duration_seconds?: number | null
+          formatted_transcript?: string | null
           id?: string
+          speaker_mappings?: Json | null
           summary?: string | null
           title: string
           transcript?: string | null
+          transcription_time_ms?: number | null
           translated_transcript?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          audio_length_seconds?: number | null
           audio_url?: string | null
           created_at?: string
+          diarized_segments?: Json | null
           duration_seconds?: number | null
+          formatted_transcript?: string | null
           id?: string
+          speaker_mappings?: Json | null
           summary?: string | null
           title?: string
           transcript?: string | null
+          transcription_time_ms?: number | null
           translated_transcript?: string | null
           updated_at?: string
           user_id?: string
