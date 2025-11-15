@@ -156,7 +156,7 @@ export const MeetingCard = ({ meeting, onDelete, onSummaryGenerated }: MeetingCa
           </div>
         )}
 
-        {meeting.transcript && !meeting.summary && (
+        {meeting.transcript && (
           <Button
             onClick={handleGenerateSummary}
             disabled={isGeneratingSummary}
@@ -164,7 +164,7 @@ export const MeetingCard = ({ meeting, onDelete, onSummaryGenerated }: MeetingCa
             variant="outline"
           >
             <Sparkles className="h-4 w-4 mr-2" />
-            {isGeneratingSummary ? 'Generating Summary...' : 'Generate AI Summary'}
+            {isGeneratingSummary ? 'Generating Summary...' : meeting.summary ? 'Regenerate AI Summary' : 'Generate AI Summary'}
           </Button>
         )}
       </CardContent>
