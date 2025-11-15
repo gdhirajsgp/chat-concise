@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { audioBase64, mimeType } = await req.json();
+    const { audioBase64, mimeType, existingSpeakerMappings } = await req.json();
     
     if (!audioBase64) {
       throw new Error('No audio data provided');
@@ -107,16 +107,25 @@ serve(async (req) => {
     console.log(`Transcription successful in ${transcriptionTimeMs}ms with ${diarizedSegments.length} segments`);
 
     // Build formatted transcript with speaker labels
+    // Use existing mappings if provided to maintain consistency across chunks
     let formattedTranscript = '';
-    const speakerMap: Record<string, string> = {};
+    const speakerMap: Record<string, string> = existingSpeakerMappings || {};
+    const existingLabels = new Set(Object.values(speakerMap));
     
     for (const segment of diarizedSegments) {
       const speakerId = segment.speaker || 'speaker_unknown';
       
-      // Create default speaker label if not exists
+      // Create default speaker label if not exists, avoiding duplicates
       if (!speakerMap[speakerId]) {
-        const speakerIndex = Object.keys(speakerMap).length;
-        speakerMap[speakerId] = `Speaker ${String.fromCharCode(65 + speakerIndex)}`; // A, B, C, etc.
+        let labelIndex = 0;
+        let label = '';
+        do {
+          label = `Speaker ${String.fromCharCode(65 + labelIndex)}`;
+          labelIndex++;
+        } while (existingLabels.has(label));
+        
+        speakerMap[speakerId] = label;
+        existingLabels.add(label);
       }
       
       const speakerLabel = speakerMap[speakerId];
