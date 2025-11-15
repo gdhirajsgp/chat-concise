@@ -112,24 +112,29 @@ serve(async (req) => {
     const speakerMap: Record<string, string> = existingSpeakerMappings || {};
     const existingLabels = new Set(Object.values(speakerMap));
     
-    for (const segment of diarizedSegments) {
-      const speakerId = segment.speaker || 'speaker_unknown';
-      
-      // Create default speaker label if not exists, avoiding duplicates
-      if (!speakerMap[speakerId]) {
-        let labelIndex = 0;
-        let label = '';
-        do {
-          label = `Speaker ${String.fromCharCode(65 + labelIndex)}`;
-          labelIndex++;
-        } while (existingLabels.has(label));
+    if (diarizedSegments.length > 0) {
+      for (const segment of diarizedSegments) {
+        const speakerId = segment.speaker || 'speaker_unknown';
         
-        speakerMap[speakerId] = label;
-        existingLabels.add(label);
+        // Create default speaker label if not exists, avoiding duplicates
+        if (!speakerMap[speakerId]) {
+          let labelIndex = 0;
+          let label = '';
+          do {
+            label = `Speaker ${String.fromCharCode(65 + labelIndex)}`;
+            labelIndex++;
+          } while (existingLabels.has(label));
+          
+          speakerMap[speakerId] = label;
+          existingLabels.add(label);
+        }
+        
+        const speakerLabel = speakerMap[speakerId];
+        formattedTranscript += `[${speakerLabel}] ${segment.text}\n`;
       }
-      
-      const speakerLabel = speakerMap[speakerId];
-      formattedTranscript += `[${speakerLabel}] ${segment.text}\n`;
+    } else {
+      // If no diarization segments, use plain transcript
+      formattedTranscript = transcript;
     }
 
     // Translate formatted transcript to English using Lovable AI
