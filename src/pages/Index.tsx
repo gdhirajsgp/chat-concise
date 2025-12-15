@@ -425,6 +425,23 @@ const Index = () => {
                 currentMeetingIdRef.current = null;
                 toast.info("Recording started - transcribing in 30s chunks");
               }}
+              onRecordingCancel={async () => {
+                // Delete partial meeting if one was created
+                if (currentMeetingIdRef.current) {
+                  await supabase
+                    .from('meetings')
+                    .delete()
+                    .eq('id', currentMeetingIdRef.current);
+                  fetchMeetings();
+                }
+                setIsProcessing(false);
+                setAccumulatedTranscript("");
+                setAccumulatedTranslatedTranscript("");
+                accumulatedTranscriptRef.current = "";
+                accumulatedTranslatedTranscriptRef.current = "";
+                setRecordingStartTime(0);
+                currentMeetingIdRef.current = null;
+              }}
             />
             {isProcessing && (
               <p className="text-muted-foreground animate-pulse">
