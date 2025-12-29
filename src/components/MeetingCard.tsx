@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileText, Sparkles, Trash2, Clock } from "lucide-react";
+import { FileText, Sparkles, Trash2, Clock, Pencil, Check, X } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
@@ -34,6 +34,8 @@ export const MeetingCard = ({ meeting, onDelete, onSummaryGenerated }: MeetingCa
   const [speakerMappings, setSpeakerMappings] = useState<Record<string, string>>(meeting.speaker_mappings || {});
   const [editingSpeaker, setEditingSpeaker] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleValue, setTitleValue] = useState(meeting.title);
 
   const handleGenerateSummary = async () => {
     // Use formatted transcript with speaker labels if available
@@ -87,6 +89,32 @@ export const MeetingCard = ({ meeting, onDelete, onSummaryGenerated }: MeetingCa
     setEditValue('');
   };
 
+  const handleRenameTitle = async () => {
+    if (!titleValue.trim()) {
+      toast.error("Title cannot be empty");
+      return;
+    }
+    
+    try {
+      await supabase
+        .from('meetings')
+        .update({ title: titleValue.trim() })
+        .eq('id', meeting.id);
+      
+      toast.success("Meeting renamed");
+      setIsEditingTitle(false);
+      onSummaryGenerated(); // Refresh to show updated title
+    } catch (error) {
+      console.error('Error renaming meeting:', error);
+      toast.error("Failed to rename meeting");
+    }
+  };
+
+  const cancelTitleEdit = () => {
+    setTitleValue(meeting.title);
+    setIsEditingTitle(false);
+  };
+
   // Apply speaker mappings to formatted transcript for display
   const getDisplayTranscript = (transcript: string | null) => {
     if (!transcript) return '';
@@ -130,7 +158,39 @@ export const MeetingCard = ({ meeting, onDelete, onSummaryGenerated }: MeetingCa
       <CardHeader>
         <div className="flex items-start justify-between">
           <div className="flex-1">
-            <CardTitle className="text-xl mb-2">{meeting.title}</CardTitle>
+            {isEditingTitle ? (
+              <div className="flex items-center gap-2 mb-2">
+                <input
+                  type="text"
+                  value={titleValue}
+                  onChange={(e) => setTitleValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleRenameTitle();
+                    if (e.key === 'Escape') cancelTitleEdit();
+                  }}
+                  className="text-xl font-semibold px-2 py-1 border rounded bg-background w-full"
+                  autoFocus
+                />
+                <Button size="icon" variant="ghost" onClick={handleRenameTitle} className="h-8 w-8 text-primary">
+                  <Check className="h-4 w-4" />
+                </Button>
+                <Button size="icon" variant="ghost" onClick={cancelTitleEdit} className="h-8 w-8 text-muted-foreground">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 mb-2 group">
+                <CardTitle className="text-xl">{meeting.title}</CardTitle>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => setIsEditingTitle(true)}
+                  className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Pencil className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
             <CardDescription className="flex items-center gap-4">
               <span className="flex items-center gap-1">
                 <Clock className="h-3 w-3" />
